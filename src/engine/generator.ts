@@ -10,8 +10,9 @@ import { ORIGINS, SLOTS, STATS, type Available, type Combo, type Slot } from './
  *   1. Choose a target Intensity Rank for the day.
  *   2. Choose ingredient sets (bigger for harder days) and a secret solution.
  *   3. List every clue that is true of the solution.
- *   4. Pick clues one at a time. Each must rule out at least one remaining
- *      combination, and the clue that leaves only the solution is "the
+ *   4. Pick clues one at a time. Most rule out at least one remaining
+ *      combination; occasionally (more often on harder days) one is a "dud"
+ *      that rules nothing out. The clue that leaves only the solution is "the
  *      minimum". Harder targets prefer more abstract clues and narrow the field
  *      more slowly, so more clues are needed.
  *   5. Add direct helper clues after the minimum ("the binder is X") so a
@@ -24,6 +25,10 @@ export const MAX_SET = 12;
 const MIN_CLUES_TO_MINIMUM = 3;
 const MAX_CLUES_TO_MINIMUM = 14;
 const ATTEMPTS = 40;
+/** Per-clue chance of a dud before the minimum, rising with difficulty; at most MAX_DUDS per puzzle. */
+const DUD_CHANCE_EASIEST = 0.3;
+const DUD_CHANCE_HARDEST = 0.4;
+const MAX_DUDS = 2;
 
 export function seedFor(puzzleNumber: number): number {
   return hashString(`a-lot-on-the-burner:${puzzleNumber}`);
@@ -186,6 +191,46 @@ function helperClues(rng: Rng, available: Available, solution: Combo): ClueSpec[
   ];
 }
 
+interface PoolEntry {
+  spec: ClueSpec;
+  pass: Uint8Array;
+  level: number;
+}
+
+/** True when every combination on the shelf that passes `earlier` also passes `later`. */
+function implies(earlier: PoolEntry, later: PoolEntry): boolean {
+  for (let j = 0; j < earlier.pass.length; j++) if (earlier.pass[j] === 1 && later.pass[j] === 0) return false;
+  return true;
+}
+
+/**
+ * A "dud": true, but every combination it would rule out is already gone. It may confirm something
+ * the player could already work out, or look useful while adding nothing. A clue that merely
+ * restates a single earlier clue ("total weight at least 8" after "at least 16") is never allowed.
+ */
+function pickDud(
+  rng: Rng,
+  pool: PoolEntry[],
+  chosen: PoolEntry[],
+  alive: number[],
+  used: Set<number>,
+  kindUses: Map<string, number>,
+  levelCentre: number,
+): number {
+  const options: { idx: number; score: number }[] = [];
+  pool.forEach((c, idx) => {
+    if (used.has(idx)) return;
+    for (const j of alive) if (c.pass[j] === 0) return;
+    const score = 0.6 * Math.abs(c.level - levelCentre) + 0.5 * (kindUses.get(c.spec.kind) ?? 0) + rng() * 0.6;
+    options.push({ idx, score });
+  });
+  options.sort((a, b) => a.score - b.score);
+  for (const { idx } of options.slice(0, 80)) {
+    if (!chosen.some((earlier) => implies(earlier, pool[idx]))) return idx;
+  }
+  return -1;
+}
+
 function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null {
   const d = difficulty(target);
   const levelCentre = 1 + 4 * d;
@@ -211,15 +256,45 @@ function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null
 
   const targetClues = Math.max(MIN_CLUES_TO_MINIMUM, Math.round((target - spaceLoad(n)) / clueWeight(levelCentre)));
 
+  type PoolClue = (typeof pool)[number];
   let alive = combos.map((_, j) => j);
-  const chosen: ClueSpec[] = [];
+  const chosen: PoolClue[] = [];
   const kindUses = new Map<string, number>();
   const used = new Set<number>();
+  const dudChance = DUD_CHANCE_EASIEST + (DUD_CHANCE_HARDEST - DUD_CHANCE_EASIEST) * d;
+  let informative = 0;
+  let duds = 0;
+  let lastWasDud = false;
+
+  const take = (idx: number) => {
+    const clue = pool[idx];
+    used.add(idx);
+    chosen.push(clue);
+    kindUses.set(clue.spec.kind, (kindUses.get(clue.spec.kind) ?? 0) + 1);
+    alive = alive.filter((j) => clue.pass[j] === 1);
+  };
 
   while (alive.length > 1) {
     const step = chosen.length + 1;
     if (step > MAX_CLUES_TO_MINIMUM) return null;
-    const goal = Math.max(1, Math.pow(n, 1 - step / targetClues));
+
+    // Sometimes slip in a clue that rules nothing out. Never as the free clue, never two in a row,
+    // and never as the clue that finishes the puzzle (that one always narrows to the answer).
+    if (step > 1 && !lastWasDud && duds < MAX_DUDS && rng() < dudChance) {
+      const dud = pickDud(rng, pool, chosen, alive, used, kindUses, levelCentre);
+      if (dud !== -1) {
+        take(dud);
+        duds++;
+        lastWasDud = true;
+        continue;
+      }
+    }
+    lastWasDud = false;
+
+    // Duds take up clue slots, so the informative clues narrow faster to keep the total on target.
+    const informativeTarget = Math.max(MIN_CLUES_TO_MINIMUM - duds, targetClues - duds);
+    const progress = informative + 1;
+    const goal = Math.max(1, Math.pow(n, 1 - progress / informativeTarget));
     let best = -1;
     let bestScore = Infinity;
     pool.forEach((c, idx) => {
@@ -229,7 +304,7 @@ function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null
       if (after === alive.length) return; // rules nothing out
       if (after === 1 && step < MIN_CLUES_TO_MINIMUM) return; // always needs at least 3 clues
       let score = Math.abs(Math.log(after) - Math.log(goal));
-      if (after === 1 && step < targetClues - 1) score += 3 * (targetClues - 1 - step);
+      if (after === 1 && progress < informativeTarget - 1) score += 3 * (informativeTarget - 1 - progress);
       score += 0.6 * Math.abs(c.level - levelCentre);
       score += 0.5 * (kindUses.get(c.spec.kind) ?? 0);
       score += rng() * 0.4;
@@ -239,23 +314,21 @@ function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null
       }
     });
     if (best === -1) return null;
-    const pickClue = pool[best];
-    used.add(best);
-    chosen.push(pickClue.spec);
-    kindUses.set(pickClue.spec.kind, (kindUses.get(pickClue.spec.kind) ?? 0) + 1);
-    alive = alive.filter((j) => pickClue.pass[j] === 1);
+    take(best);
+    informative++;
   }
 
-  const rank = intensityRank(chosen, n);
+  const specs = chosen.map((c) => c.spec);
+  const rank = intensityRank(specs, n);
   return {
     rank,
-    minClues: chosen.length,
+    minClues: specs.length,
     puzzle: {
       format: 1,
       number: puzzleNumber,
       intensity: rank,
       available,
-      clues: [...chosen, ...helperClues(rng, available, solution)],
+      clues: [...specs, ...helperClues(rng, available, solution)],
     },
   };
 }

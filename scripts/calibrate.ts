@@ -8,17 +8,22 @@ import { generatePuzzle } from '../src/engine/generator';
 import { analyse } from '../src/engine/puzzle';
 
 const count = Number(process.argv[2] ?? 200);
-const rows: { target: number; rank: number; min: number; space: number }[] = [];
+const rows: { target: number; rank: number; min: number; space: number; duds: number }[] = [];
 const started = Date.now();
 for (let i = 1; i <= count; i++) {
   const { puzzle, target, minClues } = generatePuzzle(10_000 + i);
   const a = analyse(puzzle);
   if (a.minClues !== minClues) throw new Error('minimum mismatch');
   const space = puzzle.available.base.length * puzzle.available.catalyst.length * puzzle.available.binder.length;
-  rows.push({ target, rank: puzzle.intensity, min: minClues, space });
+  let duds = 0;
+  for (let k = 1; k < minClues; k++) if (a.counts[k] === a.counts[k - 1]) duds++;
+  rows.push({ target, rank: puzzle.intensity, min: minClues, space, duds });
   if (i <= 3) {
     console.log(`\n#${i} target ${target} rank ${puzzle.intensity} min ${minClues} space ${space}`);
-    puzzle.clues.forEach((c, k) => console.log(`  ${k + 1}${k + 1 === minClues ? '*' : ' '} ${describe(c)}`));
+    puzzle.clues.forEach((c, k) => {
+      const dud = k > 0 && k < minClues && a.counts[k] === a.counts[k - 1];
+      console.log(`  ${k + 1}${k + 1 === minClues ? '*' : ' '} ${describe(c)}${dud ? '   [rules nothing out]' : ''}`);
+    });
   }
 }
 const ms = Date.now() - started;
@@ -36,6 +41,6 @@ const byBand = [5, 11, 16, 21, 26].map((lo, i, arr) => {
   const hi = arr[i + 1] ? arr[i + 1] - 1 : 30;
   const band = rows.filter((r) => r.rank >= lo && r.rank <= hi);
   const avg = (f: (r: (typeof rows)[0]) => number) => (band.reduce((s, r) => s + f(r), 0) / (band.length || 1)).toFixed(1);
-  return `${lo}-${hi}: n=${band.length} avgMin=${avg((r) => r.min)} avgSpace=${avg((r) => r.space)}`;
+  return `${lo}-${hi}: n=${band.length} avgMin=${avg((r) => r.min)} avgSpace=${avg((r) => r.space)} dudsPerPuzzle=${(band.reduce((s, r) => s + r.duds, 0) / (band.length || 1)).toFixed(2)}`;
 });
 console.log(byBand.join('\n'));

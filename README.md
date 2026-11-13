@@ -47,12 +47,14 @@ Puzzle files store the available ingredients, the clue sequence and the Intensit
 1. Choose a target Intensity Rank for the day. Most days are 5–20, and about 8% are above 20.
 2. Choose 6–12 ingredients per slot, with larger sets on harder days and an occasional heavily restricted shelf. Then pick a secret solution.
 3. List every clue that is true of the solution.
-4. Pick clues one at a time. Each must rule out at least one remaining combination. The clue that leaves exactly one potion is the minimum, and there are always at least 3 clues up to that point. Harder targets prefer more abstract clues and narrow the field more slowly.
+4. Pick clues one at a time. Most rule out at least one remaining combination. The clue that leaves exactly one potion is the minimum, and there are always at least 3 clues up to that point. Harder targets prefer more abstract clues and narrow the field more slowly.
+   - Some clues before the minimum are **duds**: true, but everything they would rule out is already gone. A dud either confirms something you could already work out ("The base is not natural" once every natural base is eliminated) or looks useful but adds nothing. Duds can appear at any rank but become more common as it rises: about 1 in 8 puzzles at ranks 5–10, about 1 in 2 at 11–15, and one or two per puzzle above 15. There are at most 2 per puzzle, never two in a row, never as the free first clue, and never as the clue that reaches the minimum.
+   - A clue that merely restates a single earlier clue ("The total weight is at least 8" after "…at least 16") is never used.
 5. After the minimum, add increasingly direct helper clues ("The binder is one of A, B or C", then naming each slot) so a stuck player can always finish.
 
 ### Intensity Rank
 
-`rank = Σ (1.5 + 0.3 × level)` over the clues up to the minimum, plus `0.8 × (log₂(combinations) − log₂(216))`, clamped to 5–30. Clue levels:
+`rank = Σ (1.5 + 0.3 × level)` over the clues up to the minimum (duds included, since the player still has to work through them), plus `0.8 × (log₂(combinations) − log₂(216))`, clamped to 5–30. Clue levels:
 
 | Level | Examples |
 |---|---|

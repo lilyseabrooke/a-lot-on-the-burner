@@ -15,11 +15,15 @@ function checkPuzzle(p: PuzzleData) {
   // Every clue is true of the answer.
   for (const clue of p.clues) expect(satisfies(clue, a.solution), describe(clue)).toBe(true);
 
-  // Every clue up to the minimum rules out at least one remaining combination.
-  let before = combos.length;
-  for (let i = 0; i < a.minClues; i++) {
-    expect(a.counts[i], `clue ${i + 1} rules nothing out`).toBeLessThan(before);
-    before = a.counts[i];
+  // The free clue and the minimum clue always narrow things down. Clues in between may be duds
+  // (rule nothing out), but no clue up to the minimum just restates a single earlier clue.
+  expect(a.counts[0]).toBeLessThan(combos.length);
+  expect(a.counts[a.minClues - 1]).toBeLessThan(a.counts[a.minClues - 2]);
+  for (let i = 1; i < a.minClues; i++) {
+    for (let j = 0; j < i; j++) {
+      const restates = combos.every((c) => !satisfies(p.clues[j], c) || satisfies(p.clues[i], c));
+      expect(restates, `clue ${i + 1} restates clue ${j + 1}`).toBe(false);
+    }
   }
   // Nothing is solved before the minimum, and the free clue alone never solves it.
   expect(a.minClues).toBeGreaterThanOrEqual(3);
@@ -99,5 +103,21 @@ group('published puzzles', () => {
       expect(p.number).toBe(Number(f.replace('.json', '')));
       checkPuzzle(p);
     }
+  });
+  it('include some duds, more often on harder days', () => {
+    const dudRate = (lo: number, hi: number) => {
+      let duds = 0;
+      let puzzles = 0;
+      for (const f of files) {
+        const p = JSON.parse(readFileSync(join(dir, f), 'utf8')) as PuzzleData;
+        if (p.intensity < lo || p.intensity > hi) continue;
+        const a = analyse(p);
+        puzzles++;
+        for (let i = 1; i < a.minClues; i++) if (a.counts[i] === a.counts[i - 1]) duds++;
+      }
+      return duds / puzzles;
+    };
+    expect(dudRate(5, 30)).toBeGreaterThan(0);
+    expect(dudRate(16, 30)).toBeGreaterThan(dudRate(5, 10));
   });
 });
