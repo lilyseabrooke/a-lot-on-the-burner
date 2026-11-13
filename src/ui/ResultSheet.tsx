@@ -6,19 +6,23 @@ import { formatCountdown, msUntilLocalMidnight } from '../game/date';
 import { bucketFor, type Stats } from '../game/stats';
 import type { DayRecord } from '../game/storage';
 import { Distribution, StatTiles } from './Distribution';
-import { spring } from './motion';
+import { PRESS_SCALE, spring } from './motion';
 import { OriginGlyph } from './origins';
 import { Sheet } from './Sheet';
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  number: number;
+  /** Puzzle heading, e.g. "No. 12" (or "Sample" for a debug puzzle). */
+  label: string;
   intensity: number;
   record: DayRecord;
   solution: Combo;
   minClues: number;
-  stats: Stats;
+  /** Null for a debug sample puzzle: it isn't counted, so there are no stats to show. */
+  stats: Stats | null;
+  /** Debug only: makes another sample puzzle at the current rank. */
+  onNextSample?: () => void;
 }
 
 function verdict(used: number, min: number): string {
@@ -42,11 +46,23 @@ function Countdown() {
   );
 }
 
-export function ResultSheet({ open, onClose, number, intensity, record, solution, minClues, stats }: Props) {
+export function ResultSheet({ open, onClose, label, intensity, record, solution, minClues, stats, onNextSample }: Props) {
   if (record.status === 'playing') return null;
   const won = record.status === 'won';
   return (
-    <Sheet open={open} onClose={onClose} eyebrow={`No. ${number} · Rank ${intensity}`} title={won ? 'The potion holds' : 'The potion curdles'}>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      eyebrow={`${label} · Rank ${intensity}`}
+      title={won ? 'The potion holds' : 'The potion curdles'}
+      actions={
+        onNextSample && (
+          <motion.button type="button" className="button primary" onClick={onNextSample} whileTap={{ scale: PRESS_SCALE }} transition={spring.snappy}>
+            Another sample
+          </motion.button>
+        )
+      }
+    >
       <div className="result">
         <motion.p
           className={`result-verdict ${won ? 'is-won' : 'is-lost'}`}
@@ -78,9 +94,15 @@ export function ResultSheet({ open, onClose, number, intensity, record, solution
             })}
           </div>
         )}
-        <StatTiles stats={stats} />
-        <Distribution stats={stats} highlight={bucketFor(record.status, record.revealed, minClues)} />
-        <Countdown />
+        {stats ? (
+          <>
+            <StatTiles stats={stats} />
+            <Distribution stats={stats} highlight={bucketFor(record.status, record.revealed, minClues)} />
+            <Countdown />
+          </>
+        ) : (
+          <p className="muted">Sample puzzle: not saved and not counted in your stats.</p>
+        )}
       </div>
     </Sheet>
   );

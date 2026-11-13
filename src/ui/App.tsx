@@ -1,13 +1,16 @@
 import { ChartColumn, CircleHelp, Flame, Pencil, Settings2 } from 'lucide-react';
 import { animate, LayoutGroup, motion, MotionConfig } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MAX_RANK, MIN_RANK } from '../engine/intensity';
 import { analyse, comboIds, type PuzzleData } from '../engine/puzzle';
 import { SLOTS, type Ingredient, type Slot } from '../engine/types';
 import { puzzleNumberFor } from '../game/date';
+import { cancelSample, DEBUG_ENABLED, loadDebugRank, makeSample, saveDebugRank, SampleCancelled } from '../game/sample';
 import { computeStats } from '../game/stats';
 import { loadSave, newDay, settingsOf, writeSave, type DayRecord, type SaveFile, type Settings } from '../game/storage';
 import { BrewButton } from './BrewButton';
 import { ClueCard, ClueList } from './ClueLog';
+import { DebugBar } from './DebugBar';
 import { fx, setSoundEnabled } from './fx';
 import { HelpSheet, WelcomeSheet } from './HelpSheet';
 import { CluesSheet, ConfirmSheet, StatsSheet } from './MiscSheets';
@@ -21,6 +24,8 @@ import { useIsWide, usePrefersDark } from './useMedia';
 type SheetName = 'welcome' | 'help' | 'stats' | 'settings' | 'confirm' | 'result' | 'clues' | null;
 type Load = { state: 'loading' } | { state: 'missing' } | { state: 'ready'; puzzle: PuzzleData };
 type Point = { x: number; y: number };
+/** A throwaway debug puzzle with its own in-memory progress, kept apart from the saved daily record and stats. */
+type Sample = { puzzle: PuzzleData; record: DayRecord; seed: number; hit: boolean };
 
 async function fetchPuzzle(n: number): Promise<PuzzleData | null> {
   if (n < 1) return null;
@@ -64,6 +69,11 @@ export function App() {
   const [flipping, setFlipping] = useState(false);
   const slotEls = useRef<Partial<Record<Slot, HTMLDivElement | null>>>({});
   const timers = useRef<number[]>([]);
+  const [sample, setSample] = useState<Sample | null>(null);
+  const [debugRank, setDebugRank] = useState(() => loadDebugRank(MIN_RANK, MAX_RANK));
+  const [sampling, setSampling] = useState(false);
+  const [sampleError, setSampleError] = useState<string>();
+  const sampleRequest = useRef(0);
 
   const wide = useIsWide();
   const prefersDark = usePrefersDark();
@@ -106,17 +116,20 @@ export function App() {
     };
   }, [today]);
 
-  const puzzle = load.state === 'ready' ? load.puzzle : null;
+  const puzzle = sample ? sample.puzzle : load.state === 'ready' ? load.puzzle : null;
   const analysis = useMemo(() => (puzzle ? analyse(puzzle) : null), [puzzle]);
-  const record = save.days[today] ?? newDay();
+  const inSample = sample !== null;
+  const record = sample ? sample.record : (save.days[today] ?? newDay());
   const stats = useMemo(() => computeStats(save, today), [save, today]);
   const finished = record.status !== 'playing';
   const ready = SLOTS.every((s) => record.placed[s]);
 
   const update = useCallback(
-    (fn: (r: DayRecord) => DayRecord) =>
-      setSave((s) => ({ ...s, days: { ...s.days, [today]: fn(s.days[today] ?? newDay()) } })),
-    [today],
+    (fn: (r: DayRecord) => DayRecord) => {
+      if (inSample) setSample((s) => s && { ...s, record: fn(s.record) });
+      else setSave((s) => ({ ...s, days: { ...s.days, [today]: fn(s.days[today] ?? newDay()) } }));
+    },
+    [today, inSample],
   );
 
   const changeSettings = (patch: Partial<Settings>) => {
@@ -125,6 +138,48 @@ export function App() {
   };
 
   const later = (ms: number, fn: () => void) => timers.current.push(window.setTimeout(fn, ms));
+
+  /** Drops everything tied to the puzzle on screen (pending animations, open sheet, tab, notes) before swapping puzzles. */
+  const resetBoard = () => {
+    timers.current.forEach((t) => window.clearTimeout(t));
+    timers.current = [];
+    setFlipping(false);
+    setDrag(null);
+    setNotes(false);
+    setTab('base');
+    setSheet(null);
+  };
+
+  const newSample = async () => {
+    const request = ++sampleRequest.current;
+    setSampling(true);
+    setSampleError(undefined);
+    try {
+      const made = await makeSample(debugRank);
+      if (request !== sampleRequest.current) return;
+      resetBoard();
+      setSample({ puzzle: made.puzzle, record: newDay(), seed: made.seed, hit: made.hit });
+    } catch (err) {
+      if (err instanceof SampleCancelled || request !== sampleRequest.current) return;
+      setSampleError(err instanceof Error ? err.message : 'Could not make a sample puzzle.');
+    } finally {
+      if (request === sampleRequest.current) setSampling(false);
+    }
+  };
+
+  const backToDaily = () => {
+    sampleRequest.current++;
+    cancelSample();
+    setSampling(false);
+    setSampleError(undefined);
+    resetBoard();
+    setSample(null);
+  };
+
+  const changeDebugRank = (rank: number) => {
+    setDebugRank(rank);
+    saveDebugRank(rank);
+  };
 
   const goTab = (slot: Slot) => {
     setTabDir(SLOTS.indexOf(slot) >= SLOTS.indexOf(tab) ? 1 : -1);
@@ -215,7 +270,7 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-      <div className="app">
+      <div className={`app${DEBUG_ENABLED ? ' has-debug' : ''}`}>
         <header className="topbar">
           <IconButton label="Settings" onClick={() => setSheet('settings')}>
             <Settings2 size={21} aria-hidden />
@@ -224,7 +279,7 @@ export function App() {
             <h1 className="wordmark">A Lot on the Burner</h1>
             {puzzle && (
               <p className="title-meta">
-                No. {puzzle.number}
+                {sample ? 'Sample' : `No. ${puzzle.number}`}
                 <span className="rank" title="Intensity Rank">
                   <Flame size={12} strokeWidth={2.6} aria-hidden />
                   <span className="sr-only">Intensity Rank</span>
@@ -243,8 +298,21 @@ export function App() {
           </div>
         </header>
 
-        {load.state === 'loading' && <p className="notice">Warming the burner…</p>}
-        {load.state === 'missing' && (
+        {DEBUG_ENABLED && (
+          <DebugBar
+            rank={debugRank}
+            onRank={changeDebugRank}
+            busy={sampling}
+            inSample={inSample}
+            missedWith={sample && !sample.hit ? sample.puzzle.intensity : undefined}
+            error={sampleError}
+            onNew={newSample}
+            onBackToDaily={backToDaily}
+          />
+        )}
+
+        {!sample && load.state === 'loading' && <p className="notice">Warming the burner…</p>}
+        {!sample && load.state === 'missing' && (
           <div className="notice">
             <h2>The burner is cold</h2>
             <p>There is no potion to brew today. Check back soon.</p>
@@ -252,7 +320,7 @@ export function App() {
         )}
 
         {puzzle && analysis && clueProps && (
-          <main className="stage">
+          <main className="stage" key={sample ? `sample-${sample.seed}` : 'daily'}>
             {wide && (
               <aside className="side-clues" aria-label="Clues">
                 <div className="side-head">
@@ -363,12 +431,13 @@ export function App() {
           <ResultSheet
             open={sheet === 'result'}
             onClose={closeSheet}
-            number={puzzle.number}
+            label={sample ? 'Sample' : `No. ${puzzle.number}`}
             intensity={puzzle.intensity}
             record={record}
             solution={analysis.solution}
             minClues={analysis.minClues}
-            stats={stats}
+            stats={inSample ? null : stats}
+            onNextSample={inSample ? newSample : undefined}
           />
         )}
       </div>

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe as group, expect, it } from 'vitest';
 import { clueLevel, describe, satisfies } from '../src/engine/clues';
-import { generatePuzzle, MAX_SET, MIN_SET } from '../src/engine/generator';
+import { generateAtRank, generatePuzzle, MAX_SET, MIN_SET } from '../src/engine/generator';
 import { intensityRank } from '../src/engine/intensity';
 import { allCombos, analyse, remaining, type PuzzleData } from '../src/engine/puzzle';
 import { ingredient, ROSTER } from '../src/engine/roster';
@@ -119,5 +119,17 @@ group('published puzzles', () => {
     };
     expect(dudRate(5, 30)).toBeGreaterThan(0);
     expect(dudRate(16, 30)).toBeGreaterThan(dudRate(5, 10));
+  });
+});
+
+group('generateAtRank (debug sample puzzles)', () => {
+  it('lands exactly on the requested rank, solvably, and is reproducible from its seed', () => {
+    for (const rank of [6, 15, 24]) {
+      const made = generateAtRank(rank, 1234);
+      expect(made.hit).toBe(true);
+      expect(made.puzzle.intensity).toBe(rank);
+      expect(analyse(made.puzzle).minClues).toBe(made.minClues);
+      expect(generateAtRank(rank, made.seed).puzzle).toEqual(made.puzzle);
+    }
   });
 });

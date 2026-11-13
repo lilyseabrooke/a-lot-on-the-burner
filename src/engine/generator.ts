@@ -353,3 +353,38 @@ export function generatePuzzle(puzzleNumber: number, seed = seedFor(puzzleNumber
   return { puzzle: best.puzzle, target: goal, minClues: best.minClues };
 }
 
+
+export interface RankResult extends GenerateResult {
+  /** The seed that produced `puzzle`; passing it back as `baseSeed` reproduces the puzzle on the first try. */
+  seed: number;
+  /** How many seeds were tried. */
+  attempts: number;
+  /** False when no seed landed exactly on the requested rank and `puzzle` is merely the closest. */
+  hit: boolean;
+}
+
+/**
+ * Makes a puzzle at exactly `rank`, for debugging and sampling. The generator only aims at a rank, so this tries
+ * baseSeed, baseSeed + 1, … until one lands on it. If none does within `tries`, returns the closest with `hit: false`.
+ */
+export function generateAtRank(rank: number, baseSeed: number, { tries = 200, number = 0 } = {}): RankResult {
+  let best: RankResult | null = null;
+  let attempts = 0;
+  for (let i = 0; i < tries; i++) {
+    attempts = i + 1;
+    const seed = (baseSeed + i) >>> 0;
+    let result: GenerateResult;
+    try {
+      result = generatePuzzle(number, seed, rank);
+    } catch {
+      continue; // the generator gave up on this seed; try the next
+    }
+    const hit = result.puzzle.intensity === rank;
+    if (!best || Math.abs(result.puzzle.intensity - rank) < Math.abs(best.puzzle.intensity - rank)) {
+      best = { ...result, seed, attempts, hit };
+    }
+    if (hit) break;
+  }
+  if (!best) throw new Error(`Could not generate any puzzle in ${tries} tries.`);
+  return { ...best, attempts };
+}

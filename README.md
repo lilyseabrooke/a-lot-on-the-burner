@@ -23,12 +23,12 @@ src/engine/     pure puzzle logic, shared by the app and the scripts
   puzzle.ts       stored puzzle format + solver (works out the answer and minimum from the clues)
   generator.ts    builds a puzzle aimed at a target Intensity Rank
   intensity.ts    the Intensity Rank formula
-src/game/       browser-side state: puzzle numbering, localStorage save, stats
+src/game/       browser-side state: puzzle numbering, localStorage save, stats, debug sample puzzles (sample.ts + worker)
 src/ui/         React components (motion for animation, drag and sheets)
   fx.ts           every sound and haptic, by name (placeholder synth sounds)
   motion.ts       shared spring presets
 src/styles/     Starfall design tokens (copied from starfall-academy) + app styles, themes and House accents
-scripts/        generate.ts (writes daily puzzles), calibrate.ts (tuning report), make-puzzle.ts (debug: one puzzle at a chosen rank)
+scripts/        generate.ts (writes daily puzzles), calibrate.ts (tuning report), make-puzzle.ts (debug: print one puzzle at a chosen rank)
 public/puzzles/ one JSON file per day, fetched by number
 ```
 
@@ -43,6 +43,8 @@ npm run generate -- --from 1 --to 365 --force  # regenerate (e.g. before launch,
 ```
 
 Puzzle files store the available ingredients, the clue sequence and the Intensity Rank, but not the answer. The client works out the answer and the minimum from the clues. A determined player could still solve it from the file, which is acceptable for a small audience.
+
+**Debug: sample puzzles in the browser.** Run `npm run dev` (or add `?debug` to the URL of any build, such as a Vercel preview) and a debug bar appears under the header: a rank slider (5–30) and a **New puzzle** button. Each press brews a fresh throwaway puzzle at exactly that rank, so you can play lots of them and feel how a rank plays. The header says "Sample" instead of a puzzle number. Sample puzzles live only in memory: they never touch your saved game, streaks or stats, and finishing one offers an **Another sample** button. The back arrow returns to today's puzzle. The generator runs in a Web Worker (hitting an exact rank can take a few seconds), and the chosen rank is remembered between visits.
 
 **Debug: make a puzzle at a specific rank.** `npm run puzzle -- --rank 18` generates a fresh puzzle at exactly that Intensity Rank (5–30) and prints the shelf size, the answer, and every clue with the number of potions left, marking the minimum, duds and helpers. It retries with new seeds until the rank matches exactly.
 

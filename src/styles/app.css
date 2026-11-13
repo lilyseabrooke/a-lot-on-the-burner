@@ -1521,3 +1521,88 @@ button {
     transition: none;
   }
 }
+
+/* ============================================================== debug bar (sample puzzles) */
+
+.app.has-debug {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.debug-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 880px;
+  margin: 2px auto 0;
+  padding: 5px var(--gutter);
+  background: var(--c-well);
+  border-block: 1px dashed var(--c-edge);
+  font-size: 13px;
+}
+
+.debug-icon {
+  color: var(--c-text-3);
+  flex: none;
+}
+
+.debug-rank {
+  flex: 1 1 140px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.debug-rank-label {
+  color: var(--c-text-2);
+  font-weight: 500;
+}
+
+.debug-rank-value {
+  min-width: 2ch;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-ink);
+}
+
+.debug-rank input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.debug-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: 0 2px 0 var(--c-edge);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.debug-button.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 2px 0 var(--accent-edge);
+}
+
+.debug-button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.debug-note {
+  flex-basis: 100%;
+  color: var(--c-wrong);
+  font-size: 12px;
+}

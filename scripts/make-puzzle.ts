@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe } from '../src/engine/clues';
-import { generatePuzzle } from '../src/engine/generator';
+import { generateAtRank } from '../src/engine/generator';
 import { MAX_RANK, MIN_RANK, rawIntensity } from '../src/engine/intensity';
 import { allCombos, analyse, type PuzzleData } from '../src/engine/puzzle';
 
@@ -57,27 +57,13 @@ if (has('write') && (writeTo === undefined || Number.isNaN(writeTo))) fail('--wr
 const baseSeed = parseInt0('seed', Math.floor(Math.random() * 2 ** 31), 0);
 const number = writeTo ?? 0;
 
-let best: ReturnType<typeof generatePuzzle> | null = null;
-let bestSeed = baseSeed;
-let used = 0;
-for (let i = 0; i < tries; i++) {
-  used = i + 1;
-  const seed = (baseSeed + i) >>> 0;
-  let result;
-  try {
-    result = generatePuzzle(number, seed, rank);
-  } catch {
-    continue; // generator gave up on this seed; try the next
-  }
-  if (!best || Math.abs(result.puzzle.intensity - rank) < Math.abs(best.puzzle.intensity - rank)) {
-    best = result;
-    bestSeed = seed;
-  }
-  if (result.puzzle.intensity === rank) break;
+let result;
+try {
+  result = generateAtRank(rank, baseSeed, { tries, number });
+} catch {
+  fail(`Could not generate any puzzle in ${tries} tries. Try a different --seed.`);
 }
-if (!best) fail(`Could not generate any puzzle in ${tries} tries. Try a different --seed.`);
-const { puzzle, minClues } = best!;
-const hit = puzzle.intensity === rank;
+const { puzzle, minClues, seed: bestSeed, attempts: used, hit } = result!;
 
 // Re-derive everything from the stored form, exactly as the client will.
 const analysis = analyse(puzzle);
