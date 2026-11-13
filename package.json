@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "generate": "tsx scripts/generate.ts",
-    "calibrate": "tsx scripts/calibrate.ts"
+    "calibrate": "tsx scripts/calibrate.ts",
+    "puzzle": "tsx scripts/make-puzzle.ts"
   },
   "dependencies": {
     "lucide-react": "^1.72.0",

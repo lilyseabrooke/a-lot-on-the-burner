@@ -28,7 +28,7 @@ src/ui/         React components (motion for animation, drag and sheets)
   fx.ts           every sound and haptic, by name (placeholder synth sounds)
   motion.ts       shared spring presets
 src/styles/     Starfall design tokens (copied from starfall-academy) + app styles, themes and House accents
-scripts/        generate.ts (writes daily puzzles), calibrate.ts (tuning report)
+scripts/        generate.ts (writes daily puzzles), calibrate.ts (tuning report), make-puzzle.ts (debug: one puzzle at a chosen rank)
 public/puzzles/ one JSON file per day, fetched by number
 ```
 
@@ -43,6 +43,17 @@ npm run generate -- --from 1 --to 365 --force  # regenerate (e.g. before launch,
 ```
 
 Puzzle files store the available ingredients, the clue sequence and the Intensity Rank, but not the answer. The client works out the answer and the minimum from the clues. A determined player could still solve it from the file, which is acceptable for a small audience.
+
+**Debug: make a puzzle at a specific rank.** `npm run puzzle -- --rank 18` generates a fresh puzzle at exactly that Intensity Rank (5–30) and prints the shelf size, the answer, and every clue with the number of potions left, marking the minimum, duds and helpers. It retries with new seeds until the rank matches exactly.
+
+```bash
+npm run puzzle -- --rank 18                      # new random puzzle (prints its seed)
+npm run puzzle -- --rank 18 --seed 7             # reproducible
+npm run puzzle -- --rank 18 --json               # also print the stored JSON
+npm run puzzle -- --rank 18 --write 400          # save as public/puzzles/400.json (add --force to overwrite)
+```
+
+Other flags: `--tries N` (seed attempts, default 200) and `--allow-miss` (accept the closest rank instead of exiting with an error). Nothing is written to disk unless `--write` is given, and a missed rank is never written.
 
 ### Generation
 
