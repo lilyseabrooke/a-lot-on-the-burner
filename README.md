@@ -24,8 +24,10 @@ src/engine/     pure puzzle logic, shared by the app and the scripts
   generator.ts    builds a puzzle aimed at a target Intensity Rank
   intensity.ts    the Intensity Rank formula
 src/game/       browser-side state: puzzle numbering, localStorage save, stats
-src/ui/         React components
-src/styles/     Starfall design tokens (copied from starfall-academy) + app styles
+src/ui/         React components (motion for animation, drag and sheets)
+  fx.ts           every sound and haptic, by name (placeholder synth sounds)
+  motion.ts       shared spring presets
+src/styles/     Starfall design tokens (copied from starfall-academy) + app styles, themes and House accents
 scripts/        generate.ts (writes daily puzzles), calibrate.ts (tuning report)
 public/puzzles/ one JSON file per day, fetched by number
 ```
@@ -72,6 +74,21 @@ Comparison clues are worded so ties are never ambiguous ("heavier than every oth
 
 Edit the names in `src/engine/roster.ts`. Puzzles reference ingredients by id, so renaming is always safe. Changing an origin, weight or volatility can break existing puzzles. `npm test` re-checks every puzzle file and will flag any that broke. Before launch, simply regenerate with `--force`.
 
+### Look and feel
+
+The game fits on one phone screen with no page scroll: a clue card at the top, three slots, a tabbed shelf and a hold-to-brew button. On screens 960px and wider the clue history moves into a side panel.
+
+- **Tiles** are pressable keycaps. Tap to place, drag onto a slot, tap a filled slot to send the tile back. Long-press (or right-click) rules an ingredient out; the pencil button turns on notes mode, where a tap rules out instead of placing.
+- **Hold to brew** is the confirmation, so there is no dialog. A click with no hold (e.g. from a screen reader) falls back to a confirm sheet.
+- After brewing, the slots flip over one by one, then the results sheet slides up.
+- Animation respects `prefers-reduced-motion`.
+
+**Themes and Houses.** Players choose Light, Dark or Auto, and a House that sets the accent colour: Dragon (violet), Eagle (crimson), Scorpion (gold, the default), Boar (forest) and Dolphin (teal). Both are attributes on `<html>` (`data-theme`, `data-house`) and every colour is a CSS variable in `src/styles/app.css`. A small script in `index.html` applies them before first paint.
+
+### Sound
+
+All sounds are placeholders, synthesised in `src/ui/fx.ts`. Each one is named after the moment it plays (`place`, `reject`, `reveal`, `holdTick`, `slotCorrect`, `win`, …); the `FxName` type lists them all with a comment saying where each is used. To replace one with a designed sound, change its entry in `SOUNDS`. Haptics (`navigator.vibrate`) sit alongside in `HAPTICS`; they work on Android and are ignored by iOS Safari. Sound can be switched off in settings.
+
 ### Saved data
 
-Everything is stored in one `localStorage` key (`a-lot-on-the-burner:v1`): each day's revealed clues, crossed-out ingredients, placed ingredients and result. Streaks, win rate and the minimum distribution are worked out from that. If storage is blocked, the game still plays; it just doesn't remember.
+Everything is stored in one `localStorage` key (`a-lot-on-the-burner:v1`): each day's revealed clues, crossed-out ingredients, placed ingredients and result, plus the player's settings (theme, House, sound). Streaks, win rate and the minimum distribution are worked out from that. If storage is blocked, the game still plays; it just doesn't remember.
