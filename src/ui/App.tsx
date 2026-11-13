@@ -1,21 +1,26 @@
-import { ChartColumn, CircleHelp } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChartColumn, CircleHelp, Flame, Pencil, Settings2 } from 'lucide-react';
+import { animate, LayoutGroup, motion, MotionConfig } from 'motion/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { analyse, comboIds, type PuzzleData } from '../engine/puzzle';
-import { ingredient } from '../engine/roster';
-import type { Ingredient, Slot } from '../engine/types';
+import { SLOTS, type Ingredient, type Slot } from '../engine/types';
 import { puzzleNumberFor } from '../game/date';
 import { computeStats } from '../game/stats';
-import { loadSave, newDay, writeSave, type DayRecord, type SaveFile } from '../game/storage';
-import { BrewStation } from './BrewStation';
-import { ClueLog } from './ClueLog';
-import { ConfirmModal } from './ConfirmModal';
-import { HelpModal } from './HelpModal';
-import { ResultModal } from './ResultModal';
-import { Shelves, type SortKey } from './Shelves';
-import { StatsModal } from './StatsModal';
+import { loadSave, newDay, settingsOf, writeSave, type DayRecord, type SaveFile, type Settings } from '../game/storage';
+import { BrewButton } from './BrewButton';
+import { ClueCard, ClueList } from './ClueLog';
+import { fx, setSoundEnabled } from './fx';
+import { HelpSheet, WelcomeSheet } from './HelpSheet';
+import { CluesSheet, ConfirmSheet, StatsSheet } from './MiscSheets';
+import { PRESS_SCALE, spring } from './motion';
+import { ResultSheet } from './ResultSheet';
+import { SettingsSheet } from './Settings';
+import { Shelves, SORTS, type SortKey } from './Shelves';
+import { FLIP_STAGGER, Slots } from './Slots';
+import { useIsWide, usePrefersDark } from './useMedia';
 
-type ModalName = 'help' | 'stats' | 'confirm' | 'result' | null;
+type SheetName = 'welcome' | 'help' | 'stats' | 'settings' | 'confirm' | 'result' | 'clues' | null;
 type Load = { state: 'loading' } | { state: 'missing' } | { state: 'ready'; puzzle: PuzzleData };
+type Point = { x: number; y: number };
 
 async function fetchPuzzle(n: number): Promise<PuzzleData | null> {
   if (n < 1) return null;
@@ -25,15 +30,57 @@ async function fetchPuzzle(n: number): Promise<PuzzleData | null> {
   return data.format === 1 ? data : null;
 }
 
+/** Keep the browser chrome in step with the page background. Must match --c-bg in app.css. */
+const THEME_COLOR = { light: '#f3eee2', dark: '#101118' };
+
+function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <motion.button
+      type="button"
+      className="icon-button"
+      onClick={() => {
+        fx('tap');
+        onClick();
+      }}
+      aria-label={label}
+      whileTap={{ scale: 0.86 }}
+      transition={spring.snappy}
+    >
+      {children}
+    </motion.button>
+  );
+}
+
 export function App() {
   const [today, setToday] = useState(() => puzzleNumberFor(new Date()));
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [save, setSave] = useState<SaveFile>(loadSave);
-  const [modal, setModal] = useState<ModalName>(() => (save.seenHelp ? null : 'help'));
+  const [sheet, setSheet] = useState<SheetName>(() => (save.seenHelp ? null : 'welcome'));
   const [sort, setSort] = useState<SortKey>('name');
-  const [dragging, setDragging] = useState<Ingredient | null>(null);
+  const [tab, setTab] = useState<Slot>('base');
+  const [tabDir, setTabDir] = useState(1);
+  const [notes, setNotes] = useState(false);
+  const [drag, setDrag] = useState<{ slot: Slot; hover: { slot: Slot; ok: boolean } | null } | null>(null);
+  const [flipping, setFlipping] = useState(false);
+  const slotEls = useRef<Partial<Record<Slot, HTMLDivElement | null>>>({});
+  const timers = useRef<number[]>([]);
+
+  const wide = useIsWide();
+  const prefersDark = usePrefersDark();
+  const settings = settingsOf(save);
+  const theme = settings.theme === 'auto' ? (prefersDark ? 'dark' : 'light') : settings.theme;
 
   useEffect(() => writeSave(save), [save]);
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme;
+    root.dataset.house = settings.house;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[theme]);
+  }, [theme, settings.house]);
+
+  useEffect(() => setSoundEnabled(settings.sound), [settings.sound]);
 
   // Roll over to the new puzzle if the page is left open past midnight.
   useEffect(() => {
@@ -64,6 +111,7 @@ export function App() {
   const record = save.days[today] ?? newDay();
   const stats = useMemo(() => computeStats(save, today), [save, today]);
   const finished = record.status !== 'playing';
+  const ready = SLOTS.every((s) => record.placed[s]);
 
   const update = useCallback(
     (fn: (r: DayRecord) => DayRecord) =>
@@ -71,129 +119,260 @@ export function App() {
     [today],
   );
 
-  const place = (slot: Slot, id: string) =>
-    update((r) => ({ ...r, placed: { ...r.placed, [slot]: r.placed[slot] === id ? undefined : id } }));
-  const clear = (slot: Slot) => update((r) => ({ ...r, placed: { ...r.placed, [slot]: undefined } }));
-  const cross = (id: string) =>
+  const changeSettings = (patch: Partial<Settings>) => {
+    if (patch.sound !== undefined) setSoundEnabled(patch.sound);
+    setSave((s) => ({ ...s, settings: { ...s.settings, ...patch } }));
+  };
+
+  const later = (ms: number, fn: () => void) => timers.current.push(window.setTimeout(fn, ms));
+
+  const goTab = (slot: Slot) => {
+    setTabDir(SLOTS.indexOf(slot) >= SLOTS.indexOf(tab) ? 1 : -1);
+    setTab(slot);
+  };
+
+  const place = (ing: Ingredient) => {
+    const slot = ing.slot;
+    fx('place');
+    update((r) => ({ ...r, placed: { ...r.placed, [slot]: ing.id } }));
+    // Move on to the next empty slot's shelf, after a beat so the landing reads.
+    const next = SLOTS.find((s) => s !== slot && !record.placed[s]);
+    if (next && tab === slot) later(320, () => goTab(next));
+  };
+
+  const remove = (slot: Slot) => {
+    fx('remove');
+    goTab(slot); // so the tile has a shelf to fly back to
+    update((r) => ({ ...r, placed: { ...r.placed, [slot]: undefined } }));
+  };
+
+  const cross = (id: string) => {
+    fx(record.crossed.includes(id) ? 'restore' : 'crossOut');
     update((r) => ({ ...r, crossed: r.crossed.includes(id) ? r.crossed.filter((c) => c !== id) : [...r.crossed, id] }));
-  const reveal = () =>
-    puzzle && update((r) => ({ ...r, revealed: Math.min(puzzle.clues.length, r.revealed + 1) }));
+  };
+
+  const reveal = () => puzzle && update((r) => ({ ...r, revealed: Math.min(puzzle.clues.length, r.revealed + 1) }));
+
+  const slotAt = ({ x, y }: Point): Slot | null => {
+    const cx = x - window.scrollX;
+    const cy = y - window.scrollY;
+    const pad = 14;
+    for (const s of SLOTS) {
+      const r = slotEls.current[s]?.getBoundingClientRect();
+      if (r && cx >= r.left - pad && cx <= r.right + pad && cy >= r.top - pad && cy <= r.bottom + pad) return s;
+    }
+    return null;
+  };
+
+  const dragMove = (ing: Ingredient, pt: Point) => {
+    const s = slotAt(pt);
+    const hover = s ? { slot: s, ok: s === ing.slot } : null;
+    setDrag((d) => (d && d.hover?.slot === hover?.slot ? d : { slot: ing.slot, hover }));
+  };
+
+  const drop = (ing: Ingredient, pt: Point) => {
+    setDrag(null);
+    const s = slotAt(pt);
+    if (s === ing.slot) place(ing);
+    else if (s) {
+      fx('reject');
+      const el = slotEls.current[s];
+      if (el) animate(el, { x: [0, -8, 8, -5, 5, 0] }, { duration: 0.34 });
+    }
+  };
 
   const brew = () => {
     if (!puzzle || !analysis) return;
     const { base, catalyst, binder } = record.placed;
     if (!base || !catalyst || !binder) return;
     const guess: [string, string, string] = [base, catalyst, binder];
-    const won = comboIds(analysis.solution).every((id, i) => id === guess[i]);
-    update((r) => ({
-      ...r,
-      status: won ? 'won' : 'lost',
-      guess,
-      minClues: analysis.minClues,
-      intensity: puzzle.intensity,
-    }));
-    setModal('result');
+    const ids = comboIds(analysis.solution);
+    const won = ids.every((id, i) => id === guess[i]);
+    setSheet(null);
+    setFlipping(true);
+    update((r) => ({ ...r, status: won ? 'won' : 'lost', guess, minClues: analysis.minClues, intensity: puzzle.intensity }));
+    guess.forEach((id, i) => later(i * FLIP_STAGGER * 1000 + 250, () => fx(id === ids[i] ? 'slotCorrect' : 'slotWrong')));
+    const end = SLOTS.length * FLIP_STAGGER * 1000 + 300;
+    later(end, () => fx(won ? 'win' : 'lose'));
+    later(end + 650, () => {
+      setFlipping(false);
+      setSheet('result');
+    });
   };
 
-  const closeModal = () => {
-    if (modal === 'help' && !save.seenHelp) setSave((s) => ({ ...s, seenHelp: true }));
-    setModal(null);
+  const closeSheet = () => {
+    if ((sheet === 'welcome' || sheet === 'help') && !save.seenHelp) setSave((s) => ({ ...s, seenHelp: true }));
+    setSheet(null);
+  };
+
+  const clueProps = puzzle && analysis && {
+    clues: puzzle.clues,
+    revealed: record.revealed,
+    finished,
+    minClues: analysis.minClues,
+    onReveal: reveal,
   };
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <p className="eyebrow">
-            {puzzle ? (
-              <>
-                No. {puzzle.number} <span className="sep">·</span> Intensity Rank{' '}
-                <span className="intensity">{puzzle.intensity}</span>
-              </>
-            ) : (
-              'Daily alchemy'
+    <MotionConfig reducedMotion="user">
+      <div className="app">
+        <header className="topbar">
+          <IconButton label="Settings" onClick={() => setSheet('settings')}>
+            <Settings2 size={21} aria-hidden />
+          </IconButton>
+          <div className="title">
+            <h1 className="wordmark">A Lot on the Burner</h1>
+            {puzzle && (
+              <p className="title-meta">
+                No. {puzzle.number}
+                <span className="rank" title="Intensity Rank">
+                  <Flame size={12} strokeWidth={2.6} aria-hidden />
+                  <span className="sr-only">Intensity Rank</span>
+                  {puzzle.intensity}
+                </span>
+              </p>
             )}
-          </p>
-          <h1 className="wordmark">A Lot on the Burner</h1>
-        </div>
-        <nav className="topbar-actions" aria-label="Game menu">
-          <button type="button" className="icon-button" onClick={() => setModal('help')} aria-label="How to play">
-            <CircleHelp size={20} aria-hidden />
-          </button>
-          <button type="button" className="icon-button" onClick={() => setModal('stats')} aria-label="Statistics">
-            <ChartColumn size={20} aria-hidden />
-          </button>
-        </nav>
-      </header>
-
-      {load.state === 'loading' && <p className="notice">Warming the burner…</p>}
-      {load.state === 'missing' && (
-        <div className="notice">
-          <h2 className="section-title">The burner is cold</h2>
-          <p>There is no potion to brew today. Check back soon.</p>
-        </div>
-      )}
-
-      {puzzle && analysis && (
-        <main className="layout">
-          <div className="workbench">
-            <BrewStation
-              record={record}
-              solution={analysis.solution}
-              dragging={dragging}
-              onDrop={(slot, id) => ingredient(id).slot === slot && update((r) => ({ ...r, placed: { ...r.placed, [slot]: id } }))}
-              onClear={clear}
-              onBrew={() => setModal('confirm')}
-            />
-            {finished && (
-              <button type="button" className="button button-secondary result-button" onClick={() => setModal('result')}>
-                {record.status === 'won' ? 'The potion holds' : 'The potion curdled'} · see results
-              </button>
-            )}
-            <ClueLog
-              clues={puzzle.clues}
-              revealed={record.revealed}
-              finished={finished}
-              minClues={analysis.minClues}
-              onReveal={reveal}
-            />
           </div>
-          <Shelves
-            available={puzzle.available}
-            placed={record.placed}
-            crossed={record.crossed}
-            locked={finished}
-            sort={sort}
-            onSort={setSort}
-            onPlace={(ing) => place(ing.slot, ing.id)}
-            onCross={cross}
-            onDragStart={setDragging}
-            onDragEnd={() => setDragging(null)}
-          />
-        </main>
-      )}
+          <div className="topbar-right">
+            <IconButton label="How to play" onClick={() => setSheet('help')}>
+              <CircleHelp size={21} aria-hidden />
+            </IconButton>
+            <IconButton label="Statistics" onClick={() => setSheet('stats')}>
+              <ChartColumn size={21} aria-hidden />
+            </IconButton>
+          </div>
+        </header>
 
-      <HelpModal open={modal === 'help'} onClose={closeModal} />
-      <StatsModal open={modal === 'stats'} onClose={closeModal} stats={stats} />
-      <ConfirmModal
-        open={modal === 'confirm'}
-        placed={record.placed}
-        revealed={record.revealed}
-        onCancel={closeModal}
-        onConfirm={brew}
-      />
-      {puzzle && analysis && (
-        <ResultModal
-          open={modal === 'result'}
-          onClose={closeModal}
-          number={puzzle.number}
-          intensity={puzzle.intensity}
-          record={record}
-          solution={analysis.solution}
-          minClues={analysis.minClues}
-          stats={stats}
+        {load.state === 'loading' && <p className="notice">Warming the burner…</p>}
+        {load.state === 'missing' && (
+          <div className="notice">
+            <h2>The burner is cold</h2>
+            <p>There is no potion to brew today. Check back soon.</p>
+          </div>
+        )}
+
+        {puzzle && analysis && clueProps && (
+          <main className="stage">
+            {wide && (
+              <aside className="side-clues" aria-label="Clues">
+                <div className="side-head">
+                  <h2 className="eyebrow">Clues</h2>
+                  <span className="side-count">{record.revealed} revealed</span>
+                </div>
+                <ClueList {...clueProps} withReveal />
+              </aside>
+            )}
+            <div className="game">
+              {!wide && <ClueCard {...clueProps} onShowAll={() => setSheet('clues')} />}
+              <LayoutGroup>
+                <Slots
+                  record={record}
+                  solution={analysis.solution}
+                  activeTab={tab}
+                  hover={drag?.hover ?? null}
+                  dragSlot={drag?.slot ?? null}
+                  flipping={flipping}
+                  register={(s, el) => (slotEls.current[s] = el)}
+                  onRemove={remove}
+                  onSelect={(s) => {
+                    fx('tab');
+                    goTab(s);
+                  }}
+                />
+                <Shelves
+                  available={puzzle.available}
+                  placed={record.placed}
+                  crossed={record.crossed}
+                  locked={finished}
+                  notes={notes}
+                  tab={tab}
+                  tabDir={tabDir}
+                  sort={sort}
+                  onTab={goTab}
+                  onSort={() => setSort((k) => SORTS[(SORTS.indexOf(k) + 1) % SORTS.length])}
+                  onPlace={place}
+                  onCross={cross}
+                  onDragStart={(ing) => setDrag({ slot: ing.slot, hover: null })}
+                  onDragMove={dragMove}
+                  onDrop={drop}
+                />
+              </LayoutGroup>
+              <div className="actions">
+                {finished ? (
+                  <motion.button
+                    type="button"
+                    className="button primary results-button"
+                    onClick={() => setSheet('result')}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: flipping ? 0 : 1, y: flipping ? 12 : 0 }}
+                    whileTap={{ scale: PRESS_SCALE }}
+                    transition={spring.bouncy}
+                  >
+                    {record.status === 'won' ? 'The potion holds' : 'The potion curdled'} · Results
+                  </motion.button>
+                ) : (
+                  <>
+                    <motion.button
+                      type="button"
+                      className={`notes-toggle${notes ? ' is-on' : ''}`}
+                      aria-pressed={notes}
+                      aria-label="Notes mode: tap ingredients to rule them out"
+                      onClick={() => {
+                        fx(notes ? 'notesOff' : 'notesOn');
+                        setNotes((n) => !n);
+                      }}
+                      whileTap={{ scale: 0.88 }}
+                      transition={spring.bouncy}
+                    >
+                      <motion.span animate={{ rotate: notes ? -20 : 0, y: notes ? -2 : 0 }} transition={spring.bouncy} style={{ display: 'grid' }}>
+                        <Pencil size={20} aria-hidden />
+                      </motion.span>
+                    </motion.button>
+                    <BrewButton
+                      ready={ready}
+                      onBrew={brew}
+                      onNotReady={() => {
+                        const empty = SLOTS.find((s) => !record.placed[s]);
+                        if (empty) goTab(empty);
+                      }}
+                      onConfirmFallback={() => setSheet('confirm')}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          </main>
+        )}
+
+        <WelcomeSheet open={sheet === 'welcome'} onClose={closeSheet} house={settings.house} onHouse={(house) => changeSettings({ house })} />
+        <HelpSheet open={sheet === 'help'} onClose={closeSheet} />
+        <SettingsSheet open={sheet === 'settings'} onClose={closeSheet} settings={settings} onChange={changeSettings} />
+        <StatsSheet open={sheet === 'stats'} onClose={closeSheet} stats={stats} />
+        {clueProps && <CluesSheet open={sheet === 'clues'} onClose={closeSheet} {...clueProps} />}
+        <ConfirmSheet
+          open={sheet === 'confirm'}
+          placed={record.placed}
+          revealed={record.revealed}
+          onCancel={closeSheet}
+          onConfirm={() => {
+            fx('brew');
+            brew();
+          }}
         />
-      )}
-    </div>
+        {puzzle && analysis && (
+          <ResultSheet
+            open={sheet === 'result'}
+            onClose={closeSheet}
+            number={puzzle.number}
+            intensity={puzzle.intensity}
+            record={record}
+            solution={analysis.solution}
+            minClues={analysis.minClues}
+            stats={stats}
+          />
+        )}
+      </div>
+    </MotionConfig>
   );
 }
+
