@@ -147,7 +147,39 @@ export function candidateClues(available: Available, solution: Combo): ClueSpec[
           add({ kind: 'pairing', id, slot, origin, only: false });
           add({ kind: 'pairing', id, slot, origin, only: true });
         }
+        for (const stat of STATS) {
+          add({ kind: 'pairedStat', id, slot, stat, more: true });
+          add({ kind: 'pairedStat', id, slot, stat, more: false });
+        }
       }
+
+  // Thresholds for "over n" / "under n" on totals: every other value across the realistic range.
+  const totalSteps = [7, 9, 11, 13, 15, 17, 19, 21, 23];
+  for (const id of ids) {
+    for (const origin of ORIGINS) {
+      add({ kind: 'pairingAny', id, origin, only: false });
+      add({ kind: 'pairingAny', id, origin, only: true });
+    }
+    for (const stat of STATS)
+      for (const op of ['over', 'under'] as const) for (const n of totalSteps) add({ kind: 'ingredientTotal', id, stat, op, n });
+  }
+  for (const ifStat of STATS)
+    for (const thenStat of STATS) {
+      if (ifStat === thenStat) continue;
+      for (const ifOp of ['over', 'under'] as const)
+        for (const thenOp of ['over', 'under'] as const)
+          for (const ifN of totalSteps)
+            for (const thenN of totalSteps) add({ kind: 'totalsConditional', ifStat, ifOp, ifN, thenStat, thenOp, thenN });
+    }
+  for (const stat of STATS) {
+    for (const most of [true, false])
+      for (const origin of ORIGINS) {
+        add({ kind: 'extremeOrigin', stat, most, origin, is: true });
+        add({ kind: 'extremeOrigin', stat, most, origin, is: false });
+      }
+    add({ kind: 'extremesShare', stat, same: true });
+    add({ kind: 'extremesShare', stat, same: false });
+  }
 
   return out;
 }

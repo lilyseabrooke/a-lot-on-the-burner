@@ -13,6 +13,8 @@ import type { Combo, Ingredient, Origin, Slot, Stat } from './types';
 
 export type Bound = 'atLeast' | 'atMost';
 export type OriginCount = 'none' | 'exactlyOne' | 'atLeastOne' | 'atLeastTwo';
+/** Strict bounds, for clues worded "over 12" / "under 10". */
+export type Strict = 'over' | 'under';
 
 export type ClueSpec =
   | { kind: 'slotOrigin'; slot: Slot; origin: Origin; is: boolean }
@@ -35,6 +37,12 @@ export type ClueSpec =
   | { kind: 'diffBound'; a: Slot; b: Slot; stat: Stat; op: Bound; n: number }
   | { kind: 'sumVsOne'; slot: Slot; stat: Stat; greater: boolean }
   | { kind: 'shareFraction'; slot: Slot; stat: Stat; ifOrigin: Origin | null; moreThan: boolean; den: 2 | 3 | 4 }
+  | { kind: 'pairingAny'; id: string; origin: Origin; only: boolean }
+  | { kind: 'pairedStat'; id: string; slot: Slot; stat: Stat; more: boolean }
+  | { kind: 'ingredientTotal'; id: string; stat: Stat; op: Strict; n: number }
+  | { kind: 'totalsConditional'; ifStat: Stat; ifOp: Strict; ifN: number; thenStat: Stat; thenOp: Strict; thenN: number }
+  | { kind: 'extremeOrigin'; stat: Stat; most: boolean; origin: Origin; is: boolean }
+  | { kind: 'extremesShare'; stat: Stat; same: boolean }
   | { kind: 'slotOneOf'; slot: Slot; ids: string[] }
   | { kind: 'slotIs'; slot: Slot; id: string };
 
@@ -54,12 +62,18 @@ export const CLUE_LEVEL: Record<ClueKind, number> = {
   pairShare: 2,
   originVariety: 3,
   pairing: 3,
+  pairingAny: 3,
+  pairedStat: 3,
+  ingredientTotal: 3,
+  extremeOrigin: 3,
+  extremesShare: 3,
   totalBound: 3,
   totalParity: 3,
   selfCompare: 3,
   pairParity: 4,
   totalCompare: 4,
   conditionalOrigin: 4,
+  totalsConditional: 4,
   diffBound: 4,
   sumVsOne: 4,
   shareFraction: 5,
@@ -73,6 +87,21 @@ const others = (slot: Slot): Slot[] => (['base', 'catalyst', 'binder'] as Slot[]
 const parts = (c: Combo): Ingredient[] => [c.base, c.catalyst, c.binder];
 const total = (c: Combo, stat: Stat) => c.base[stat] + c.catalyst[stat] + c.binder[stat];
 const isEven = (n: number) => n % 2 === 0;
+const beyond = (v: number, op: Strict, n: number) => (op === 'over' ? v > n : v < n);
+const withId = (c: Combo, id: string): Slot | null =>
+  c.base.id === id ? 'base' : c.catalyst.id === id ? 'catalyst' : c.binder.id === id ? 'binder' : null;
+
+const SLOT_ORDER: Slot[] = ['base', 'catalyst', 'binder'];
+
+/**
+ * Components at the top (most) or bottom of a stat. Ties all count, so "the heaviest component"
+ * means every component tied for heaviest; clues that use this say "(ties included)".
+ */
+function extremes(c: Combo, stat: Stat, most: boolean): Slot[] {
+  const vals = SLOT_ORDER.map((s) => c[s][stat]);
+  const edge = most ? Math.max(...vals) : Math.min(...vals);
+  return SLOT_ORDER.filter((s) => c[s][stat] === edge);
+}
 
 export function satisfies(spec: ClueSpec, c: Combo): boolean {
   switch (spec.kind) {
@@ -163,6 +192,31 @@ export function satisfies(spec: ClueSpec, c: Combo): boolean {
       const t = total(c, spec.stat);
       return spec.moreThan ? share > t : share <= t;
     }
+    case 'pairingAny': {
+      const host = withId(c, spec.id);
+      if (!host) return true;
+      return others(host).some((s) => c[s].origin === spec.origin) === spec.only;
+    }
+    case 'pairedStat': {
+      const host = withId(c, spec.id);
+      if (!host) return true;
+      const v = c[host][spec.stat];
+      const o = c[spec.slot][spec.stat];
+      return spec.more ? o > v : o < v;
+    }
+    case 'ingredientTotal':
+      if (!withId(c, spec.id)) return true;
+      return beyond(total(c, spec.stat), spec.op, spec.n);
+    case 'totalsConditional':
+      if (!beyond(total(c, spec.ifStat), spec.ifOp, spec.ifN)) return true;
+      return beyond(total(c, spec.thenStat), spec.thenOp, spec.thenN);
+    case 'extremeOrigin':
+      return extremes(c, spec.stat, spec.most).every((s) => (c[s].origin === spec.origin) === spec.is);
+    case 'extremesShare': {
+      const top = extremes(c, spec.stat, true);
+      const bottom = extremes(c, spec.stat, false);
+      return top.every((h) => bottom.every((l) => h === l || (c[h].origin === c[l].origin) === spec.same));
+    }
     case 'slotOneOf':
       return spec.ids.includes(c[spec.slot].id);
     case 'slotIs':
@@ -188,6 +242,11 @@ function listOr(items: string[]): string {
 function heavier(stat: Stat, more: boolean): string {
   if (stat === 'weight') return more ? 'heavier' : 'lighter';
   return more ? 'more volatile' : 'less volatile';
+}
+
+function superlative(stat: Stat, most: boolean): string {
+  if (stat === 'weight') return most ? 'heaviest' : 'lightest';
+  return most ? 'most volatile' : 'least volatile';
 }
 
 /** "no lighter" / "no less volatile" — the non-strict form of heavier/more volatile. */
@@ -277,6 +336,20 @@ export function describe(spec: ClueSpec): string {
         ? `${subject} accounts for more than ${frac} of the total ${spec.stat}.`
         : `${subject} accounts for no more than ${frac} of the total ${spec.stat}.`;
     }
+    case 'pairingAny':
+      return spec.only
+        ? `${name(spec.id)} must be paired with ${article(spec.origin)} ${spec.origin} ingredient.`
+        : `${name(spec.id)} cannot be paired with ${article(spec.origin)} ${spec.origin} ingredient.`;
+    case 'pairedStat':
+      return `${name(spec.id)} must be paired with ${article(heavier(spec.stat, spec.more))} ${heavier(spec.stat, spec.more)} ${spec.slot}.`;
+    case 'ingredientTotal':
+      return `${name(spec.id)} requires a total ${spec.stat} ${spec.op} ${spec.n}.`;
+    case 'totalsConditional':
+      return `A total ${spec.ifStat} ${spec.ifOp} ${spec.ifN} requires a total ${spec.thenStat} ${spec.thenOp} ${spec.thenN}.`;
+    case 'extremeOrigin':
+      return `The ${superlative(spec.stat, spec.most)} component ${spec.is ? 'must' : 'cannot'} be ${spec.origin} (ties included).`;
+    case 'extremesShare':
+      return `The ${superlative(spec.stat, true)} and ${superlative(spec.stat, false)} components ${spec.same ? 'must' : 'cannot'} share an origin (ties included).`;
     case 'slotOneOf':
       return `${The(spec.slot)} is ${listOr(spec.ids.map(name))}.`;
     case 'slotIs':

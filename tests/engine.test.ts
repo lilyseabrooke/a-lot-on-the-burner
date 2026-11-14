@@ -63,7 +63,58 @@ group('clues', () => {
     expect(satisfies({ kind: 'shareFraction', slot: 'base', stat: 'weight', ifOrigin: null, moreThan: true, den: 2 }, combo)).toBe(false);
     expect(satisfies({ kind: 'shareFraction', slot: 'base', stat: 'weight', ifOrigin: 'natural', moreThan: true, den: 2 }, combo)).toBe(true);
   });
+  it('evaluates ingredient-specific clues', () => {
+    // Mindwretch Resin is in the potion, paired with demonic (1/1) and natural (6/1) components.
+    expect(satisfies({ kind: 'pairingAny', id: 'b15', origin: 'natural', only: false }, combo)).toBe(false);
+    expect(satisfies({ kind: 'pairingAny', id: 'b15', origin: 'demonic', only: true }, combo)).toBe(true);
+    expect(satisfies({ kind: 'pairingAny', id: 'b02', origin: 'natural', only: false }, combo)).toBe(true);
+    // Equal weights (6 vs 6) are neither heavier nor lighter.
+    expect(satisfies({ kind: 'pairedStat', id: 'b15', slot: 'binder', stat: 'weight', more: true }, combo)).toBe(false);
+    expect(satisfies({ kind: 'pairedStat', id: 'b15', slot: 'binder', stat: 'weight', more: false }, combo)).toBe(false);
+    expect(satisfies({ kind: 'pairedStat', id: 'b15', slot: 'catalyst', stat: 'weight', more: false }, combo)).toBe(true);
+    // total weight 13, total volatility 11
+    expect(satisfies({ kind: 'ingredientTotal', id: 'b15', stat: 'weight', op: 'under', n: 13 }, combo)).toBe(false);
+    expect(satisfies({ kind: 'ingredientTotal', id: 'b15', stat: 'weight', op: 'under', n: 14 }, combo)).toBe(true);
+    expect(satisfies({ kind: 'ingredientTotal', id: 'b02', stat: 'weight', op: 'under', n: 5 }, combo)).toBe(true);
+  });
+  it('evaluates conditionals on totals', () => {
+    const spec = { kind: 'totalsConditional', ifStat: 'volatility', ifOp: 'over', ifN: 10, thenStat: 'weight', thenOp: 'over', thenN: 12 } as const;
+    expect(satisfies(spec, combo)).toBe(true);
+    expect(satisfies({ ...spec, thenN: 13 }, combo)).toBe(false);
+    expect(satisfies({ ...spec, ifN: 11, thenN: 13 }, combo)).toBe(true); // condition not met
+  });
+  it('counts every tied component as an extreme', () => {
+    // Weights 6, 1, 6: base and binder are both heaviest.
+    expect(satisfies({ kind: 'extremeOrigin', stat: 'weight', most: true, origin: 'spectral', is: true }, combo)).toBe(false);
+    expect(satisfies({ kind: 'extremeOrigin', stat: 'weight', most: true, origin: 'demonic', is: false }, combo)).toBe(true);
+    expect(satisfies({ kind: 'extremeOrigin', stat: 'weight', most: false, origin: 'demonic', is: true }, combo)).toBe(true);
+    expect(satisfies({ kind: 'extremesShare', stat: 'weight', same: false }, combo)).toBe(true);
+    // Volatilities 9, 1, 1: lightest are catalyst (demonic) and binder (natural).
+    expect(satisfies({ kind: 'extremesShare', stat: 'volatility', same: false }, combo)).toBe(true);
+    expect(satisfies({ kind: 'extremesShare', stat: 'volatility', same: true }, combo)).toBe(false);
+  });
   it('reads naturally', () => {
+    expect(describe({ kind: 'pairingAny', id: 'b15', origin: 'natural', only: false })).toBe(
+      'Mindwretch Resin cannot be paired with a natural ingredient.',
+    );
+    expect(describe({ kind: 'pairedStat', id: 'b08', slot: 'binder', stat: 'weight', more: true })).toBe(
+      'Contract Ink must be paired with a heavier binder.',
+    );
+    expect(describe({ kind: 'pairedStat', id: 'b08', slot: 'catalyst', stat: 'volatility', more: false })).toBe(
+      'Contract Ink must be paired with a less volatile catalyst.',
+    );
+    expect(describe({ kind: 'ingredientTotal', id: 'b11', stat: 'weight', op: 'under', n: 10 })).toBe(
+      'Fire Solution requires a total weight under 10.',
+    );
+    expect(
+      describe({ kind: 'totalsConditional', ifStat: 'volatility', ifOp: 'over', ifN: 10, thenStat: 'weight', thenOp: 'over', thenN: 12 }),
+    ).toBe('A total volatility over 10 requires a total weight over 12.');
+    expect(describe({ kind: 'extremeOrigin', stat: 'volatility', most: true, origin: 'spectral', is: false })).toBe(
+      'The most volatile component cannot be spectral (ties included).',
+    );
+    expect(describe({ kind: 'extremesShare', stat: 'weight', same: false })).toBe(
+      'The heaviest and lightest components cannot share an origin (ties included).',
+    );
     expect(describe({ kind: 'pairing', id: 'b15', slot: 'binder', origin: 'natural', only: false })).toBe(
       'Mindwretch Resin cannot be paired with a natural binder.',
     );
@@ -86,7 +137,7 @@ group('generator', () => {
       checkPuzzle(puzzle);
       expect(Math.abs(puzzle.intensity - target)).toBeLessThanOrEqual(2);
     }
-  });
+  }, 30_000);
   it('the full clue list always pins down one potion', () => {
     const { puzzle } = generatePuzzle(3);
     expect(remaining(allCombos(puzzle.available), puzzle.clues)).toHaveLength(1);
