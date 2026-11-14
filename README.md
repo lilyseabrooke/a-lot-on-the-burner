@@ -18,7 +18,7 @@ Deploys to Vercel as a static Vite site, with no server or environment variables
 ```
 src/engine/     pure puzzle logic, shared by the app and the scripts
   types.ts        slots, origins, ingredients
-  roster.ts       the fixed ingredient list (placeholder names)
+  roster.ts       the fixed ingredient list (96 ingredients, 16 per origin)
   clues.ts        every clue type: how it's checked, how it reads, how abstract it is
   puzzle.ts       stored puzzle format + solver (works out the answer and minimum from the clues)
   generator.ts    builds a puzzle aimed at a target Intensity Rank
@@ -70,9 +70,9 @@ Comparison clues are worded so ties are never ambiguous ("heavier than every oth
 
 `npm run calibrate -- 400` prints the rank and minimum-clue distributions for a batch of generated puzzles. Use it after changing weights or clue types.
 
-### Replacing the placeholder roster
+### Editing the roster
 
-Edit the names in `src/engine/roster.ts`. Puzzles reference ingredients by id, so renaming is always safe. Changing an origin, weight or volatility can break existing puzzles. `npm test` re-checks every puzzle file and will flag any that broke. Before launch, simply regenerate with `--force`.
+Edit `src/engine/roster.ts`. Puzzles reference ingredients by id, so renaming is always safe. Changing an origin, weight or volatility can break existing puzzles. `npm test` re-checks every puzzle file and will flag any that broke. Before launch, simply regenerate with `--force`.
 
 ### Look and feel
 
