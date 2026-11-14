@@ -62,11 +62,11 @@ Puzzle files store the available ingredients, the clue sequence and the Intensit
 |---|---|
 | 1 | The base is not extraplanar · Moonwax is not in the potion · The base weighs at least 6 |
 | 2 | The catalyst is heavier than every other component · No component is demonic · The base and the binder share an origin |
-| 3 | Abyssal Dust cannot be paired with a natural ingredient · Contract Ink must be paired with a heavier binder · Fire Solution requires a total weight under 10 · The most volatile component cannot be spectral (ties included) · The total weight is odd |
+| 3 | Abyssal Dust cannot be paired with a natural ingredient · Contract Ink must be paired with a heavier binder · Fire Solution requires a total weight under 10 · The most volatile component cannot be spectral · The total weight is odd |
 | 4 | The binder and the catalyst have weights of different parity · If the base is natural, the binder is not demonic · A total volatility over 11 requires a total weight under 15 |
 | 5 | A natural base cannot account for more than a third of the total weight |
 
-Comparison clues are worded so ties are never ambiguous ("heavier than every other component" or "no lighter than any other component"). Clues that name "the heaviest component" (or lightest, most or least volatile) count every component tied for that spot, and say "(ties included)". "Heavier" and "lighter" are always strict, so equal weights are neither. Clues worded "over" and "under" are strict too.
+Comparison clues are worded so ties are never ambiguous ("heavier than every other component" or "no lighter than any other component"). Clues that name "the heaviest component" (or lightest, most or least volatile) count every component tied for that spot; the help sheet spells this rule out for players. "Heavier" and "lighter" are always strict, so equal weights are neither. Clues worded "over" and "under" are strict too.
 
 `npm run calibrate -- 400` prints the rank and minimum-clue distributions for a batch of generated puzzles. Use it after changing weights or clue types.
 

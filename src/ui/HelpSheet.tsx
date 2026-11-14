@@ -1,4 +1,4 @@
-import { Hand, Lightbulb, Pencil, Plus } from 'lucide-react';
+import { Hand, Lightbulb, Pencil, Plus, Scale } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import type { House } from '../game/storage';
@@ -25,6 +25,13 @@ export function Rules() {
         <li>
           <Pencil size={18} aria-hidden />
           <span>Long-press an ingredient, or switch on notes mode, to rule it out.</span>
+        </li>
+        <li>
+          <Scale size={18} aria-hidden />
+          <span>
+            <strong>Ties:</strong> “the heaviest component” means every component tied for heaviest, and the same goes
+            for lightest, most and least volatile. “Heavier”, “over” and “under” are strict, so a tie never counts.
+          </span>
         </li>
         <li>
           <Hand size={18} aria-hidden />

@@ -95,7 +95,7 @@ const SLOT_ORDER: Slot[] = ['base', 'catalyst', 'binder'];
 
 /**
  * Components at the top (most) or bottom of a stat. Ties all count, so "the heaviest component"
- * means every component tied for heaviest; clues that use this say "(ties included)".
+ * means every component tied for heaviest. The help sheet explains this tie rule.
  */
 function extremes(c: Combo, stat: Stat, most: boolean): Slot[] {
   const vals = SLOT_ORDER.map((s) => c[s][stat]);
@@ -347,9 +347,9 @@ export function describe(spec: ClueSpec): string {
     case 'totalsConditional':
       return `A total ${spec.ifStat} ${spec.ifOp} ${spec.ifN} requires a total ${spec.thenStat} ${spec.thenOp} ${spec.thenN}.`;
     case 'extremeOrigin':
-      return `The ${superlative(spec.stat, spec.most)} component ${spec.is ? 'must' : 'cannot'} be ${spec.origin} (ties included).`;
+      return `The ${superlative(spec.stat, spec.most)} component ${spec.is ? 'must' : 'cannot'} be ${spec.origin}.`;
     case 'extremesShare':
-      return `The ${superlative(spec.stat, true)} and ${superlative(spec.stat, false)} components ${spec.same ? 'must' : 'cannot'} share an origin (ties included).`;
+      return `The ${superlative(spec.stat, true)} and ${superlative(spec.stat, false)} components ${spec.same ? 'must' : 'cannot'} share an origin.`;
     case 'slotOneOf':
       return `${The(spec.slot)} is ${listOr(spec.ids.map(name))}.`;
     case 'slotIs':

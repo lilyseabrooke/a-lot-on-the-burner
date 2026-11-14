@@ -110,10 +110,10 @@ group('clues', () => {
       describe({ kind: 'totalsConditional', ifStat: 'volatility', ifOp: 'over', ifN: 10, thenStat: 'weight', thenOp: 'over', thenN: 12 }),
     ).toBe('A total volatility over 10 requires a total weight over 12.');
     expect(describe({ kind: 'extremeOrigin', stat: 'volatility', most: true, origin: 'spectral', is: false })).toBe(
-      'The most volatile component cannot be spectral (ties included).',
+      'The most volatile component cannot be spectral.',
     );
     expect(describe({ kind: 'extremesShare', stat: 'weight', same: false })).toBe(
-      'The heaviest and lightest components cannot share an origin (ties included).',
+      'The heaviest and lightest components cannot share an origin.',
     );
     expect(describe({ kind: 'pairing', id: 'b15', slot: 'binder', origin: 'natural', only: false })).toBe(
       'Mindwretch Resin cannot be paired with a natural binder.',
