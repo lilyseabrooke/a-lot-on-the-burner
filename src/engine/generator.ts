@@ -35,14 +35,29 @@ export function seedFor(puzzleNumber: number): number {
   return hashString(`a-lot-on-the-burner:${puzzleNumber}`);
 }
 
-/** Most days are 5–20; above 20 is rare (≈8%). */
+/**
+ * Daily target ranks follow a split normal curve peaking at 15: most days land 13–17
+ * and 10–20 is the norm. The hard side is wider so 28–30 still turns up (~1 day a year)
+ * while 5–7 stays rare too.
+ */
+const TARGET_MODE = 15;
+const TARGET_SD_EASY = 3.5;
+const TARGET_SD_HARD = 4.5;
+
+/** Standard normal sample (Box–Muller). */
+function gaussian(rng: Rng): number {
+  const u = 1 - rng(); // (0, 1], keeps log finite
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
+}
+
 export function pickTargetRank(rng: Rng): number {
-  const r = rng();
-  if (r < 0.3) return randInt(rng, 5, 10);
-  if (r < 0.62) return randInt(rng, 11, 15);
-  if (r < 0.92) return randInt(rng, 16, 20);
-  if (r < 0.98) return randInt(rng, 21, 25);
-  return randInt(rng, 26, 30);
+  for (;;) {
+    const z = Math.abs(gaussian(rng));
+    // Each side's share is proportional to its width, so the curve stays continuous at the peak.
+    const easySide = rng() < TARGET_SD_EASY / (TARGET_SD_EASY + TARGET_SD_HARD);
+    const rank = Math.round(easySide ? TARGET_MODE - TARGET_SD_EASY * z : TARGET_MODE + TARGET_SD_HARD * z);
+    if (rank >= MIN_RANK && rank <= MAX_RANK) return rank; // redraw rather than pile up at the ends
+  }
 }
 
 /** 0 at the easiest rank, 1 at the hardest. */

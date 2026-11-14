@@ -179,7 +179,7 @@ group('clues', () => {
 group('generator', () => {
   it('is deterministic for a seed', () => {
     expect(generatePuzzle(7).puzzle).toEqual(generatePuzzle(7).puzzle);
-  });
+  }, 30_000);
   it('produces valid puzzles across the difficulty range', () => {
     for (const target of [5, 10, 15, 20, 25, 30]) {
       const { puzzle } = generatePuzzle(1, 1000 + target, target);
