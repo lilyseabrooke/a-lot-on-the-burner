@@ -21,6 +21,8 @@ export interface Ingredient {
   origin: Origin;
   weight: number;
   volatility: number;
+  /** Wording only: the name takes plural verbs ("Swirl Shards are in the potion"). */
+  plural: boolean;
 }
 
 /** A candidate potion: one ingredient per slot, in SLOTS order. */

@@ -1,4 +1,5 @@
-import { clueLevel, satisfies, type ClueSpec } from './clues';
+import { clueFamily, clueLevel, satisfies, type ClueSpec, type Connective } from './clues';
+import { factSlots, holds, isComponentFact, isHostRelative, isSubjectFact, type Fact } from './facts';
 import { clueWeight, intensityRank, MAX_RANK, MIN_RANK, spaceLoad } from './intensity';
 import { allCombos, type PuzzleData } from './puzzle';
 import { rosterFor } from './roster';
@@ -50,7 +51,7 @@ const difficulty = (target: number) => (target - MIN_RANK) / (MAX_RANK - MIN_RAN
 // ------------------------------------------------------------ clue pool
 
 /** Every non-helper clue that is true of the solution and could matter for these sets. */
-export function candidateClues(available: Available, solution: Combo): ClueSpec[] {
+export function candidateClues(available: Available, solution: Combo, rng: Rng = mulberry32(1)): ClueSpec[] {
   const out: ClueSpec[] = [];
   const add = (spec: ClueSpec) => {
     if (satisfies(spec, solution)) out.push(spec);
@@ -113,11 +114,6 @@ export function candidateClues(available: Available, solution: Combo): ClueSpec[
         add({ kind: 'slotCompare', a, b, stat, strict: true });
         add({ kind: 'slotCompare', a, b, stat, strict: false });
       }
-      for (const ifOrigin of ORIGINS)
-        for (const thenOrigin of ORIGINS) {
-          add({ kind: 'conditionalOrigin', ifSlot: a, ifOrigin, thenSlot: b, thenOrigin, is: true });
-          add({ kind: 'conditionalOrigin', ifSlot: a, ifOrigin, thenSlot: b, thenOrigin, is: false });
-        }
     }
 
   for (const origin of ORIGINS)
@@ -139,49 +135,225 @@ export function candidateClues(available: Available, solution: Combo): ClueSpec[
     add({ kind: 'totalCompare', over, strict: false });
   }
 
-  for (const host of SLOTS)
-    for (const id of available[host])
-      for (const slot of SLOTS) {
-        if (slot === host) continue;
-        for (const origin of ORIGINS) {
-          add({ kind: 'pairing', id, slot, origin, only: false });
-          add({ kind: 'pairing', id, slot, origin, only: true });
-        }
-        for (const stat of STATS) {
-          add({ kind: 'pairedStat', id, slot, stat, more: true });
-          add({ kind: 'pairedStat', id, slot, stat, more: false });
-        }
-      }
-
-  // Thresholds for "over n" / "under n" on totals: every other value across the realistic range.
-  const totalSteps = [7, 9, 11, 13, 15, 17, 19, 21, 23];
-  for (const id of ids) {
-    for (const origin of ORIGINS) {
-      add({ kind: 'pairingAny', id, origin, only: false });
-      add({ kind: 'pairingAny', id, origin, only: true });
-    }
-    for (const stat of STATS)
-      for (const op of ['over', 'under'] as const) for (const n of totalSteps) add({ kind: 'ingredientTotal', id, stat, op, n });
-  }
-  for (const ifStat of STATS)
-    for (const thenStat of STATS) {
-      if (ifStat === thenStat) continue;
-      for (const ifOp of ['over', 'under'] as const)
-        for (const thenOp of ['over', 'under'] as const)
-          for (const ifN of totalSteps)
-            for (const thenN of totalSteps) add({ kind: 'totalsConditional', ifStat, ifOp, ifN, thenStat, thenOp, thenN });
-    }
-  for (const stat of STATS) {
-    for (const most of [true, false])
-      for (const origin of ORIGINS) {
-        add({ kind: 'extremeOrigin', stat, most, origin, is: true });
-        add({ kind: 'extremeOrigin', stat, most, origin, is: false });
-      }
-    add({ kind: 'extremesShare', stat, same: true });
-    add({ kind: 'extremesShare', stat, same: false });
-  }
+  out.push(...ruleClues(available, solution, rng));
+  out.push(...rankClues(solution));
+  out.push(...anyOriginClues(solution));
 
   return out;
+}
+
+// ------------------------------------------------------------ composite clues
+
+/** Every simple fact that rule clues can be built from, for this shelf. */
+function factsFor(available: Available): Fact[] {
+  const out: Fact[] = [];
+  for (const slot of SLOTS) for (const id of available[slot]) out.push({ f: 'has', id });
+  for (const slot of SLOTS) {
+    for (const origin of ORIGINS) out.push({ f: 'origin', slot, origin });
+    for (const stat of STATS) {
+      for (let n = 3; n <= 7; n++) out.push({ f: 'slotStat', slot, stat, op: 'over', n });
+      for (let n = 4; n <= 8; n++) out.push({ f: 'slotStat', slot, stat, op: 'under', n });
+      out.push({ f: 'slotParity', slot, stat, even: true }, { f: 'slotParity', slot, stat, even: false });
+    }
+  }
+  for (const a of SLOTS)
+    for (const b of SLOTS) if (a !== b) for (const stat of STATS) out.push({ f: 'cmp', a, b, stat, strict: true });
+  for (const stat of STATS) {
+    for (let n = 9; n <= 21; n += 2) out.push({ f: 'total', stat, op: 'over', n }, { f: 'total', stat, op: 'under', n: n + 1 });
+    out.push({ f: 'totalParity', stat, even: true }, { f: 'totalParity', stat, even: false });
+  }
+  for (const origin of ORIGINS)
+    for (const count of ['none', 'atLeastOne', 'atLeastTwo', 'atMostOne'] as const) out.push({ f: 'count', origin, count });
+  out.push({ f: 'variety', distinct: true }, { f: 'variety', distinct: false });
+  out.push(
+    ...(
+      [
+        ['base', 'catalyst'],
+        ['base', 'binder'],
+        ['catalyst', 'binder'],
+      ] as [Slot, Slot][]
+    ).flatMap(([a, b]) => [
+      { f: 'share', a, b, same: true } as Fact,
+      { f: 'share', a, b, same: false } as Fact,
+    ]),
+  );
+  return out;
+}
+
+/** Facts that only make sense next to a named ingredient: "a natural ingredient", "a heavier binder". */
+function hostFacts(): Fact[] {
+  const out: Fact[] = [];
+  for (const origin of ORIGINS) out.push({ f: 'otherOrigin', origin });
+  for (const slot of SLOTS) for (const stat of STATS) for (const more of [true, false]) out.push({ f: 'relStat', slot, stat, more });
+  out.push({ f: 'othersShare', same: true }, { f: 'othersShare', same: false });
+  return out;
+}
+
+/** Two facts make a sensible rule only if they talk about different things. */
+function compatible(a: Fact, b: Fact): boolean {
+  const sa = factSlots(a);
+  if (factSlots(b).some((s) => sa.includes(s))) return false;
+  if (a.f === b.f && (a.f === 'total' || a.f === 'variety')) return a.f === 'total' && b.f === 'total' && a.stat !== b.stat;
+  if (a.f === 'count' && b.f === 'count' && a.origin === b.origin) return false;
+  if ((a.f === 'variety' || b.f === 'variety') && (a.f === 'share' || b.f === 'share')) return false;
+  return true;
+}
+
+/** How many rule clues of each shape to sample per attempt (the full space is tens of thousands). */
+const RULE_SAMPLES = 200;
+
+function ruleClues(available: Available, solution: Combo, rng: Rng): ClueSpec[] {
+  const facts = factsFor(available);
+  const ingredients = facts.filter((f) => f.f === 'has');
+  const components = facts.filter(isComponentFact);
+  // After a named ingredient, counts and shared-origin facts are ambiguous (does the ingredient
+  // count?), so those use the host-relative forms instead: "a natural ingredient", "two other…".
+  const afterIngredient = facts.filter((f) => f.f !== 'count' && f.f !== 'variety');
+  const host = hostFacts();
+  const pick = <T>(xs: T[]) => xs[Math.floor(rng() * xs.length)];
+  const out: ClueSpec[] = [];
+
+  const shapes: { conn: Connective; a: () => Fact; b: () => Fact }[] = [
+    // Ingredient-led: "Contract Ink requires…", "…must be paired with…", "…cannot be paired with…"
+    { conn: 'requires', a: () => pick(ingredients), b: () => (rng() < 0.4 ? pick(host) : pick(afterIngredient)) },
+    { conn: 'excludes', a: () => pick(ingredients), b: () => (rng() < 0.4 ? pick(host) : pick(components)) },
+    // Fact-led conditionals
+    { conn: 'requires', a: () => pick(facts.filter((f) => f.f !== 'has' && isSubjectFact(f))), b: () => pick(facts) },
+    { conn: 'excludes', a: () => pick(components.filter((f) => f.f !== 'has')), b: () => pick(components) },
+    { conn: 'either', a: () => pick(facts), b: () => pick(facts) },
+    { conn: 'xor', a: () => pick(facts), b: () => pick(facts) },
+    { conn: 'iff', a: () => pick(facts), b: () => pick(facts) },
+  ];
+  for (const shape of shapes) {
+    let found = 0;
+    for (let tries = 0; tries < RULE_SAMPLES * 20 && found < RULE_SAMPLES; tries++) {
+      const a = shape.a();
+      const b = shape.b();
+      if (!compatible(a, b)) continue;
+      const spec: ClueSpec = { kind: 'rule', conn: shape.conn, a, b };
+      if (!satisfies(spec, solution)) continue;
+      out.push(spec);
+      found++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Clues about the middle-ranked component ("the middle-weight component", "the middle weight is 5")
+ * are switched off for now: with ties (5, 5, 8) it isn't clear which component is "the middle".
+ */
+const MIDDLE_RANK_CLUES = false;
+
+function rankClues(solution: Combo): ClueSpec[] {
+  const out: ClueSpec[] = [];
+  const add = (spec: ClueSpec) => {
+    if (spec.kind === 'rank' && spec.pos === 'middle' && !MIDDLE_RANK_CLUES) return;
+    if (satisfies(spec, solution)) out.push(spec);
+  };
+  for (const stat of STATS) {
+    for (const slot of SLOTS) {
+      add({ kind: 'rank', stat, pos: 'middle', prop: { p: 'slot', slot, is: true } });
+      add({ kind: 'rank', stat, pos: 'middle', prop: { p: 'slot', slot, is: false } });
+    }
+    for (let n = 1; n <= 10; n++) add({ kind: 'rank', stat, pos: 'middle', prop: { p: 'value', op: 'is', n } });
+    for (let n = 2; n <= 8; n++) {
+      add({ kind: 'rank', stat, pos: 'middle', prop: { p: 'value', op: 'over', n } });
+      add({ kind: 'rank', stat, pos: 'middle', prop: { p: 'value', op: 'under', n: n + 1 } });
+    }
+    add({ kind: 'rank', stat, pos: 'middle', prop: { p: 'valueParity', even: true } });
+    add({ kind: 'rank', stat, pos: 'middle', prop: { p: 'valueParity', even: false } });
+    for (const pos of ['top', 'bottom'] as const) {
+      for (const slot of SLOTS) add({ kind: 'rank', stat, pos, prop: { p: 'slot', slot, is: false } });
+      for (const origin of ORIGINS)
+        for (const is of [true, false]) add({ kind: 'rank', stat, pos, prop: { p: 'origin', origin, is } });
+      for (const pos2 of ['top', 'bottom'] as const)
+        for (const is of [true, false]) add({ kind: 'rank', stat, pos, prop: { p: 'alsoRank', pos2, is } });
+      for (let n = 3; n <= 7; n++) {
+        add({ kind: 'rank', stat, pos, prop: { p: 'bound', op: 'over', n } });
+        add({ kind: 'rank', stat, pos, prop: { p: 'bound', op: 'under', n: n + 1 } });
+      }
+      add({ kind: 'rank', stat, pos, prop: { p: 'parity', even: true } });
+      add({ kind: 'rank', stat, pos, prop: { p: 'parity', even: false } });
+    }
+    for (const more of [true, false]) add({ kind: 'rank', stat, pos: 'top', prop: { p: 'vsBottom', more } });
+    for (const same of [true, false]) add({ kind: 'rank', stat, pos: 'top', prop: { p: 'share', same } });
+    for (let n = 2; n <= 6; n++) add({ kind: 'rank', stat, pos: 'top', prop: { p: 'spread', op: 'atLeast', n } });
+    for (let n = 1; n <= 4; n++) add({ kind: 'rank', stat, pos: 'top', prop: { p: 'spread', op: 'atMost', n } });
+    for (const is of [true, false]) add({ kind: 'rank', stat, pos: 'top', prop: { p: 'outweighs', is } });
+  }
+  return out;
+}
+
+function anyOriginClues(solution: Combo): ClueSpec[] {
+  const out: ClueSpec[] = [];
+  const add = (spec: ClueSpec) => {
+    if (satisfies(spec, solution)) out.push(spec);
+  };
+  for (const origin of ORIGINS)
+    for (const stat of STATS) {
+      for (const must of [true, false]) {
+        for (const slot of SLOTS) add({ kind: 'anyOrigin', origin, must, prop: { p: 'vsSlot', slot, stat } });
+        for (let n = 3; n <= 7; n++) {
+          add({ kind: 'anyOrigin', origin, must, prop: { p: 'bound', stat, op: 'over', n } });
+          add({ kind: 'anyOrigin', origin, must, prop: { p: 'bound', stat, op: 'under', n: n + 1 } });
+        }
+        for (const other of ORIGINS)
+          if (other !== origin) add({ kind: 'anyOrigin', origin, must, prop: { p: 'vsOrigin', other, stat } });
+      }
+      for (const even of [true, false]) add({ kind: 'anyOrigin', origin, must: true, prop: { p: 'parity', stat, even } });
+    }
+  return out;
+}
+
+/**
+ * Which combos each clue allows (1) or rules out (0). Rule clues are built from a few hundred facts
+ * shared across thousands of rules, so each fact is checked against the combos once and reused.
+ */
+function passVectors(combos: Combo[]): (spec: ClueSpec) => Uint8Array {
+  const n = combos.length;
+  const factCache = new Map<string, Uint8Array>();
+  const factVector = (f: Fact): Uint8Array => {
+    const key = JSON.stringify(f);
+    let v = factCache.get(key);
+    if (!v) {
+      v = new Uint8Array(n);
+      for (let j = 0; j < n; j++) v[j] = holds(f, combos[j]) ? 1 : 0;
+      factCache.set(key, v);
+    }
+    return v;
+  };
+  return (spec) => {
+    const pass = new Uint8Array(n);
+    if (spec.kind === 'rule' && !isHostRelative(spec.b)) {
+      const A = factVector(spec.a);
+      const B = factVector(spec.b);
+      for (let j = 0; j < n; j++) {
+        const a = A[j] === 1;
+        const b = B[j] === 1;
+        switch (spec.conn) {
+          case 'requires':
+            pass[j] = !a || b ? 1 : 0;
+            break;
+          case 'excludes':
+            pass[j] = a && b ? 0 : 1;
+            break;
+          case 'either':
+            pass[j] = a || b ? 1 : 0;
+            break;
+          case 'xor':
+            pass[j] = a !== b ? 1 : 0;
+            break;
+          case 'iff':
+            pass[j] = a === b ? 1 : 0;
+            break;
+        }
+      }
+      return pass;
+    }
+    for (let j = 0; j < n; j++) pass[j] = satisfies(spec, combos[j]) ? 1 : 0;
+    return pass;
+  };
 }
 
 // ------------------------------------------------------------ generation
@@ -253,7 +425,7 @@ function pickDud(
   pool.forEach((c, idx) => {
     if (used.has(idx)) return;
     for (const j of alive) if (c.pass[j] === 0) return;
-    const score = 0.6 * Math.abs(c.level - levelCentre) + 0.5 * (kindUses.get(c.spec.kind) ?? 0) + rng() * 0.6;
+    const score = 0.6 * Math.abs(c.level - levelCentre) + 0.5 * (kindUses.get(clueFamily(c.spec)) ?? 0) + rng() * 0.6;
     options.push({ idx, score });
   });
   options.sort((a, b) => a.score - b.score);
@@ -272,16 +444,12 @@ function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null
   const solutionIndex = randInt(rng, 0, n - 1);
   const solution = combos[solutionIndex];
 
-  const pool = candidateClues(available, solution)
+  const passFor = passVectors(combos);
+  const pool = candidateClues(available, solution, rng)
     .map((spec) => {
-      const pass = new Uint8Array(n);
+      const pass = passFor(spec);
       let passing = 0;
-      combos.forEach((combo, j) => {
-        if (satisfies(spec, combo)) {
-          pass[j] = 1;
-          passing++;
-        }
-      });
+      for (let j = 0; j < n; j++) passing += pass[j];
       return { spec, pass, passing, level: clueLevel(spec) };
     })
     .filter((c) => c.passing < n);
@@ -302,7 +470,7 @@ function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null
     const clue = pool[idx];
     used.add(idx);
     chosen.push(clue);
-    kindUses.set(clue.spec.kind, (kindUses.get(clue.spec.kind) ?? 0) + 1);
+    kindUses.set(clueFamily(clue.spec), (kindUses.get(clueFamily(clue.spec)) ?? 0) + 1);
     alive = alive.filter((j) => clue.pass[j] === 1);
   };
 
@@ -338,7 +506,7 @@ function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null
       let score = Math.abs(Math.log(after) - Math.log(goal));
       if (after === 1 && progress < informativeTarget - 1) score += 3 * (informativeTarget - 1 - progress);
       score += 0.6 * Math.abs(c.level - levelCentre);
-      score += 0.5 * (kindUses.get(c.spec.kind) ?? 0);
+      score += 0.5 * (kindUses.get(clueFamily(c.spec)) ?? 0);
       score += rng() * 0.4;
       if (score < bestScore) {
         bestScore = score;

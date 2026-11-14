@@ -113,8 +113,11 @@ const BINDERS: Row[] = [
   ['d35', 'Driving Ring', 'artificial', 6, 3],
 ];
 
+/** Names that take plural verbs. Wording only; it never affects which clues are true. */
+const PLURAL = new Set(['b20', 'c01', 'c19', 'd21', 'd28', 'd29']);
+
 function build(slot: Slot, rows: Row[]): Ingredient[] {
-  return rows.map(([id, name, origin, weight, volatility]) => ({ id, name, slot, origin, weight, volatility }));
+  return rows.map(([id, name, origin, weight, volatility]) => ({ id, name, slot, origin, weight, volatility, plural: PLURAL.has(id) }));
 }
 
 export const ROSTER: readonly Ingredient[] = [
