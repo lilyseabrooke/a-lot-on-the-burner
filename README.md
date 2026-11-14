@@ -20,6 +20,7 @@ src/engine/     pure puzzle logic, shared by the app and the scripts
   types.ts        slots, origins, ingredients
   roster.ts       the fixed ingredient list (96 ingredients, 16 per origin)
   clues.ts        every clue type: how it's checked, how it reads, how abstract it is
+  facts.ts        simple facts ("a natural base", "a total weight over 12") that rule clues join
   puzzle.ts       stored puzzle format + solver (works out the answer and minimum from the clues)
   generator.ts    builds a puzzle aimed at a target Intensity Rank
   intensity.ts    the Intensity Rank formula
@@ -75,17 +76,25 @@ Other flags: `--tries N` (seed attempts, default 200) and `--allow-miss` (accept
 |---|---|
 | 1 | The base is not extraplanar · Moonwax is not in the potion · The base weighs at least 6 |
 | 2 | The catalyst is heavier than every other component · No component is demonic · The base and the binder share an origin |
-| 3 | Contract Ink cannot be paired with a natural binder · The total weight is odd · The base's weight is greater than its volatility |
-| 4 | The binder and the catalyst have weights of different parity · If the base is natural, the binder is not demonic |
-| 5 | A natural base cannot account for more than a third of the total weight |
+| 3 | Contract Ink must be paired with a heavier binder · Fire Solution requires a total weight under 10 · The most volatile component cannot be spectral · Any demonic component must have an even weight · The total weight is odd |
+| 4 | A natural base cannot be paired with a demonic binder · A total volatility over 11 requires a total weight under 15 · At least one of these is true: the binder is draconic, or the catalyst weighs more than 5 · The heaviest component is more volatile than the lightest |
+| 5 | A natural base cannot account for more than a third of the total weight · The base is natural if and only if the catalyst is heavier than the binder · Exactly one of these is true: … |
 
-Comparison clues are worded so ties are never ambiguous ("heavier than every other component" or "no lighter than any other component").
+**Composite clues.** Three clue kinds are built from parts, and their level depends on the parts:
+
+- `rule` joins two facts from `facts.ts`: *requires* / *must be paired with* (level 3 when led by a named ingredient, else 4), *cannot be paired with* (same), *at least one of these is true* (4), *exactly one of these is true* and *if and only if* (5). A few facts only make sense after a named ingredient and are measured against it: "a natural ingredient" (another component), "a heavier binder", "two other components of the same origin". After an ingredient, the generator avoids counts ("at least one demonic component") because it's unclear whether the ingredient itself counts.
+- `rank` picks out a component by rank (the heaviest, the least volatile…) and says something about it: its slot, origin, other stat, or how it compares with the opposite rank. Clues about the middle rank are written but switched off (`MIDDLE_RANK_CLUES` in `generator.ts`), because with ties it isn't clear which component is "the middle".
+- `anyOrigin` constrains every component of an origin without saying one exists: "Any natural component cannot be heavier than the binder." It's vacuously true when there are none.
+
+The generator samples rule clues (there are tens of thousands of fact pairs per shelf) and spreads its picks across clue *families* (`clueFamily`), so one puzzle doesn't lean on a single shape.
+
+Comparison clues are worded so ties are never ambiguous ("heavier than every other component" or "no lighter than any other component"). Clues that name "the heaviest component" (or lightest, most or least volatile) count every component tied for that spot; the help sheet spells this rule out for players. "Heavier" and "lighter" are always strict, so equal weights are neither. Clues worded "over" and "under" are strict too.
 
 `npm run calibrate -- 400` prints the rank and minimum-clue distributions for a batch of generated puzzles. Use it after changing weights or clue types.
 
 ### Editing the roster
 
-Edit `src/engine/roster.ts`. Puzzles reference ingredients by id, so renaming is always safe. Changing an origin, weight or volatility can break existing puzzles. `npm test` re-checks every puzzle file and will flag any that broke. Before launch, simply regenerate with `--force`.
+Edit `src/engine/roster.ts`. Names that take plural verbs ("Swirl Shards are in the potion") are listed in `PLURAL` there; it only affects wording. Puzzles reference ingredients by id, so renaming is always safe. Changing an origin, weight or volatility can break existing puzzles. `npm test` re-checks every puzzle file and will flag any that broke. Before launch, simply regenerate with `--force`.
 
 ### Look and feel
 

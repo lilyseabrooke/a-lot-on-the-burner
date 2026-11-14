@@ -1,3 +1,4 @@
+import { clause, hostSlot, holds, noun, isComponentFact, verb, type Fact } from './facts';
 import { ingredient } from './roster';
 import type { Combo, Ingredient, Origin, Slot, Stat } from './types';
 
@@ -13,6 +14,32 @@ import type { Combo, Ingredient, Origin, Slot, Stat } from './types';
 
 export type Bound = 'atLeast' | 'atMost';
 export type OriginCount = 'none' | 'exactlyOne' | 'atLeastOne' | 'atLeastTwo';
+/** Strict bounds, for clues worded "over 12" / "under 10". */
+export type Strict = 'over' | 'under';
+
+/** How a rule clue joins its two facts. */
+export type Connective = 'requires' | 'excludes' | 'either' | 'xor' | 'iff';
+/** A component picked out by rank: heaviest (top), middle, lightest (bottom); ties all count. */
+export type RankPos = 'top' | 'middle' | 'bottom';
+
+export type RankProp =
+  | { p: 'slot'; slot: Slot; is: boolean }
+  | { p: 'origin'; origin: Origin; is: boolean }
+  | { p: 'alsoRank'; pos2: 'top' | 'bottom'; is: boolean } // rank on the other stat
+  | { p: 'bound'; op: Strict; n: number } // the other stat
+  | { p: 'parity'; even: boolean } // the other stat
+  | { p: 'vsBottom'; more: boolean } // top only: the other stat, against the bottom
+  | { p: 'share'; same: boolean } // top only: origin, against the bottom
+  | { p: 'spread'; op: Bound; n: number } // top only: top minus bottom
+  | { p: 'outweighs'; is: boolean } // top only: more than the other two combined
+  | { p: 'value'; op: 'is' | Strict; n: number } // middle only
+  | { p: 'valueParity'; even: boolean }; // middle only
+
+export type AnyProp =
+  | { p: 'vsSlot'; slot: Slot; stat: Stat }
+  | { p: 'bound'; stat: Stat; op: Strict; n: number }
+  | { p: 'parity'; stat: Stat; even: boolean }
+  | { p: 'vsOrigin'; other: Origin; stat: Stat };
 
 export type ClueSpec =
   | { kind: 'slotOrigin'; slot: Slot; origin: Origin; is: boolean }
@@ -25,16 +52,17 @@ export type ClueSpec =
   | { kind: 'originCount'; origin: Origin; count: OriginCount }
   | { kind: 'pairShare'; a: Slot; b: Slot; same: boolean }
   | { kind: 'originVariety'; allDistinct: boolean }
-  | { kind: 'pairing'; id: string; slot: Slot; origin: Origin; only: boolean }
   | { kind: 'totalBound'; stat: Stat; op: Bound; n: number }
   | { kind: 'totalParity'; stat: Stat; even: boolean }
   | { kind: 'selfCompare'; slot: Slot; over: Stat; strict: boolean }
   | { kind: 'pairParity'; a: Slot; b: Slot; stat: Stat; same: boolean }
   | { kind: 'totalCompare'; over: Stat; strict: boolean }
-  | { kind: 'conditionalOrigin'; ifSlot: Slot; ifOrigin: Origin; thenSlot: Slot; thenOrigin: Origin; is: boolean }
   | { kind: 'diffBound'; a: Slot; b: Slot; stat: Stat; op: Bound; n: number }
   | { kind: 'sumVsOne'; slot: Slot; stat: Stat; greater: boolean }
   | { kind: 'shareFraction'; slot: Slot; stat: Stat; ifOrigin: Origin | null; moreThan: boolean; den: 2 | 3 | 4 }
+  | { kind: 'rule'; conn: Connective; a: Fact; b: Fact }
+  | { kind: 'rank'; stat: Stat; pos: RankPos; prop: RankProp }
+  | { kind: 'anyOrigin'; origin: Origin; must: boolean; prop: AnyProp }
   | { kind: 'slotOneOf'; slot: Slot; ids: string[] }
   | { kind: 'slotIs'; slot: Slot; id: string };
 
@@ -53,26 +81,170 @@ export const CLUE_LEVEL: Record<ClueKind, number> = {
   originCount: 2,
   pairShare: 2,
   originVariety: 3,
-  pairing: 3,
   totalBound: 3,
   totalParity: 3,
   selfCompare: 3,
   pairParity: 4,
   totalCompare: 4,
-  conditionalOrigin: 4,
   diffBound: 4,
   sumVsOne: 4,
   shareFraction: 5,
+  // The composite kinds below vary by part; see clueLevel.
+  rule: 4,
+  rank: 3,
+  anyOrigin: 3,
+};
+
+const RANK_LEVEL: Record<RankProp['p'], number> = {
+  slot: 3,
+  origin: 3,
+  bound: 3,
+  parity: 3,
+  value: 3,
+  valueParity: 3,
+  share: 3,
+  alsoRank: 4,
+  vsBottom: 4,
+  spread: 4,
+  outweighs: 4,
 };
 
 export function clueLevel(spec: ClueSpec): number {
-  return CLUE_LEVEL[spec.kind];
+  switch (spec.kind) {
+    case 'rule':
+      if (spec.conn === 'xor' || spec.conn === 'iff') return 5;
+      if (spec.conn === 'either') return 4;
+      return spec.a.f === 'has' ? 3 : 4;
+    case 'rank':
+      return RANK_LEVEL[spec.prop.p];
+    case 'anyOrigin':
+      return spec.prop.p === 'vsSlot' || spec.prop.p === 'vsOrigin' ? 4 : 3;
+    default:
+      return CLUE_LEVEL[spec.kind];
+  }
+}
+
+/** A finer grouping than kind, so the generator can spread its picks across clue shapes. */
+export function clueFamily(spec: ClueSpec): string {
+  switch (spec.kind) {
+    case 'rule':
+      return `rule:${spec.conn}${spec.a.f === 'has' ? ':ingredient' : ''}`;
+    case 'rank':
+      return `rank:${spec.prop.p}`;
+    case 'anyOrigin':
+      return `any:${spec.prop.p}`;
+    default:
+      return spec.kind;
+  }
 }
 
 const others = (slot: Slot): Slot[] => (['base', 'catalyst', 'binder'] as Slot[]).filter((s) => s !== slot);
 const parts = (c: Combo): Ingredient[] => [c.base, c.catalyst, c.binder];
 const total = (c: Combo, stat: Stat) => c.base[stat] + c.catalyst[stat] + c.binder[stat];
 const isEven = (n: number) => n % 2 === 0;
+const beyond = (v: number, op: Strict, n: number) => (op === 'over' ? v > n : v < n);
+
+const SLOT_ORDER: Slot[] = ['base', 'catalyst', 'binder'];
+const otherStat = (stat: Stat): Stat => (stat === 'weight' ? 'volatility' : 'weight');
+
+/** Value at a rank: highest, middle or lowest of the three. */
+function rankValue(c: Combo, stat: Stat, pos: RankPos): number {
+  const x = c.base[stat];
+  const y = c.catalyst[stat];
+  const z = c.binder[stat];
+  if (pos === 'top') return Math.max(x, y, z);
+  if (pos === 'bottom') return Math.min(x, y, z);
+  return x + y + z - Math.max(x, y, z) - Math.min(x, y, z);
+}
+
+/** Components at a rank. Ties all count: two components tied for heaviest are both "the heaviest". */
+export function rankSlots(c: Combo, stat: Stat, pos: RankPos): Slot[] {
+  const v = rankValue(c, stat, pos);
+  return SLOT_ORDER.filter((s) => c[s][stat] === v);
+}
+
+function ruleHolds(conn: Connective, a: Fact, b: Fact, c: Combo): boolean {
+  const host = a.f === 'has' ? hostSlot(c, a.id) : null;
+  const A = holds(a, c);
+  const B = holds(b, c, host);
+  switch (conn) {
+    case 'requires':
+      return !A || B;
+    case 'excludes':
+      return !(A && B);
+    case 'either':
+      return A || B;
+    case 'xor':
+      return A !== B;
+    case 'iff':
+      return A === B;
+  }
+}
+
+function rankHolds(spec: Extract<ClueSpec, { kind: 'rank' }>, c: Combo): boolean {
+  const { stat, pos, prop } = spec;
+  const members = rankSlots(c, stat, pos);
+  const o = otherStat(stat);
+  switch (prop.p) {
+    case 'slot':
+      return prop.is ? members.length === 1 && members[0] === prop.slot : !members.includes(prop.slot);
+    case 'origin':
+      return members.every((s) => (c[s].origin === prop.origin) === prop.is);
+    case 'alsoRank': {
+      const second = rankSlots(c, o, prop.pos2);
+      return members.every((s) => second.includes(s) === prop.is);
+    }
+    case 'bound':
+      return members.every((s) => beyond(c[s][o], prop.op, prop.n));
+    case 'parity':
+      return members.every((s) => isEven(c[s][o]) === prop.even);
+    case 'vsBottom': {
+      const bottom = rankSlots(c, stat, 'bottom');
+      return members.every((h) => bottom.every((l) => h === l || (prop.more ? c[h][o] > c[l][o] : c[h][o] < c[l][o])));
+    }
+    case 'share': {
+      const bottom = rankSlots(c, stat, 'bottom');
+      return members.every((h) => bottom.every((l) => h === l || (c[h].origin === c[l].origin) === prop.same));
+    }
+    case 'spread': {
+      const d = rankValue(c, stat, 'top') - rankValue(c, stat, 'bottom');
+      return prop.op === 'atLeast' ? d >= prop.n : d <= prop.n;
+    }
+    case 'outweighs': {
+      const top = rankValue(c, stat, 'top');
+      return (top * 2 > total(c, stat)) === prop.is;
+    }
+    case 'value': {
+      const v = rankValue(c, stat, 'middle');
+      return prop.op === 'is' ? v === prop.n : beyond(v, prop.op, prop.n);
+    }
+    case 'valueParity':
+      return isEven(rankValue(c, stat, 'middle')) === prop.even;
+  }
+}
+
+function anyHolds(spec: Extract<ClueSpec, { kind: 'anyOrigin' }>, c: Combo): boolean {
+  const { origin, must, prop } = spec;
+  for (const s of SLOT_ORDER) {
+    if (c[s].origin !== origin) continue;
+    switch (prop.p) {
+      case 'vsSlot':
+        if (s !== prop.slot && c[s][prop.stat] > c[prop.slot][prop.stat] !== must) return false;
+        break;
+      case 'bound':
+        if (beyond(c[s][prop.stat], prop.op, prop.n) !== must) return false;
+        break;
+      case 'parity':
+        if (isEven(c[s][prop.stat]) !== prop.even) return false;
+        break;
+      case 'vsOrigin':
+        for (const t of SLOT_ORDER)
+          if (t !== s && c[t].origin === prop.other && c[s][prop.stat] > c[t][prop.stat] !== must) return false;
+        break;
+    }
+  }
+  return true;
+}
 
 export function satisfies(spec: ClueSpec, c: Combo): boolean {
   switch (spec.kind) {
@@ -121,11 +293,6 @@ export function satisfies(spec: ClueSpec, c: Combo): boolean {
       const distinct = new Set(parts(c).map((i) => i.origin)).size === 3;
       return distinct === spec.allDistinct;
     }
-    case 'pairing': {
-      const host = ingredient(spec.id);
-      if (c[host.slot].id !== spec.id) return true;
-      return (c[spec.slot].origin === spec.origin) === spec.only;
-    }
     case 'totalBound': {
       const t = total(c, spec.stat);
       return spec.op === 'atLeast' ? t >= spec.n : t <= spec.n;
@@ -145,9 +312,6 @@ export function satisfies(spec: ClueSpec, c: Combo): boolean {
       const u = total(c, under);
       return spec.strict ? o > u : o >= u;
     }
-    case 'conditionalOrigin':
-      if (c[spec.ifSlot].origin !== spec.ifOrigin) return true;
-      return (c[spec.thenSlot].origin === spec.thenOrigin) === spec.is;
     case 'diffBound': {
       const d = Math.abs(c[spec.a][spec.stat] - c[spec.b][spec.stat]);
       return spec.op === 'atLeast' ? d >= spec.n : d <= spec.n;
@@ -163,6 +327,12 @@ export function satisfies(spec: ClueSpec, c: Combo): boolean {
       const t = total(c, spec.stat);
       return spec.moreThan ? share > t : share <= t;
     }
+    case 'rule':
+      return ruleHolds(spec.conn, spec.a, spec.b, c);
+    case 'rank':
+      return rankHolds(spec, c);
+    case 'anyOrigin':
+      return anyHolds(spec, c);
     case 'slotOneOf':
       return spec.ids.includes(c[spec.slot].id);
     case 'slotIs':
@@ -190,6 +360,11 @@ function heavier(stat: Stat, more: boolean): string {
   return more ? 'more volatile' : 'less volatile';
 }
 
+function superlative(stat: Stat, most: boolean): string {
+  if (stat === 'weight') return most ? 'heaviest' : 'lightest';
+  return most ? 'most volatile' : 'least volatile';
+}
+
 /** "no lighter" / "no less volatile" — the non-strict form of heavier/more volatile. */
 function noLess(stat: Stat, more: boolean): string {
   if (stat === 'weight') return more ? 'no lighter' : 'no heavier';
@@ -203,7 +378,7 @@ export function describe(spec: ClueSpec): string {
     case 'slotOriginEither':
       return `${The(spec.slot)} is either ${spec.origins[0]} or ${spec.origins[1]}.`;
     case 'excluded':
-      return `${name(spec.id)} is not in the potion.`;
+      return `${name(spec.id)} ${verb(spec.id, 'is', 'are')} not in the potion.`;
     case 'slotStatBound': {
       const bound = spec.op === 'atLeast' ? 'at least' : 'at most';
       return spec.stat === 'weight'
@@ -234,11 +409,6 @@ export function describe(spec: ClueSpec): string {
       return `${The(spec.a)} and ${the(spec.b)} ${spec.same ? 'share an origin' : 'do not share an origin'}.`;
     case 'originVariety':
       return spec.allDistinct ? 'No two components share an origin.' : 'At least two components share an origin.';
-    case 'pairing':
-      return `${name(spec.id)} can ${spec.only ? 'only' : 'not'} be paired with ${article(spec.origin)} ${spec.origin} ${spec.slot}.`.replace(
-        'can not',
-        'cannot',
-      );
     case 'totalBound':
       return `The total ${spec.stat} is ${spec.op === 'atLeast' ? 'at least' : 'at most'} ${spec.n}.`;
     case 'totalParity':
@@ -255,8 +425,6 @@ export function describe(spec: ClueSpec): string {
       const under: Stat = spec.over === 'weight' ? 'volatility' : 'weight';
       return `The total ${spec.over} is ${spec.strict ? 'greater than' : 'no less than'} the total ${under}.`;
     }
-    case 'conditionalOrigin':
-      return `If ${the(spec.ifSlot)} is ${spec.ifOrigin}, ${the(spec.thenSlot)} is ${spec.is ? '' : 'not '}${spec.thenOrigin}.`;
     case 'diffBound': {
       const plural = spec.stat === 'weight' ? 'weights' : 'volatilities';
       return `The ${plural} of ${the(spec.a)} and ${the(spec.b)} differ by ${spec.op === 'atLeast' ? 'at least' : 'at most'} ${spec.n}.`;
@@ -277,9 +445,94 @@ export function describe(spec: ClueSpec): string {
         ? `${subject} accounts for more than ${frac} of the total ${spec.stat}.`
         : `${subject} accounts for no more than ${frac} of the total ${spec.stat}.`;
     }
+    case 'rule':
+      return describeRule(spec.conn, spec.a, spec.b);
+    case 'rank':
+      return describeRank(spec);
+    case 'anyOrigin':
+      return describeAny(spec);
     case 'slotOneOf':
       return `${The(spec.slot)} is ${listOr(spec.ids.map(name))}.`;
     case 'slotIs':
       return `${The(spec.slot)} is ${name(spec.id)}.`;
+  }
+}
+
+function describeRule(conn: Connective, a: Fact, b: Fact): string {
+  switch (conn) {
+    case 'requires':
+      return isComponentFact(a) && isComponentFact(b)
+        ? `${capitalise(noun(a))} must be paired with ${noun(b)}.`
+        : `${capitalise(noun(a))} ${a.f === 'has' ? verb(a.id, 'requires', 'require') : 'requires'} ${noun(b)}.`;
+    case 'excludes':
+      return `${capitalise(noun(a))} cannot be paired with ${noun(b)}.`;
+    case 'either':
+      return `At least one of these is true: ${clause(a)}, or ${clause(b)}.`;
+    case 'xor':
+      return `Exactly one of these is true: ${clause(a)}, or ${clause(b)}.`;
+    case 'iff':
+      return `${capitalise(clause(a))} if and only if ${clause(b)}.`;
+  }
+}
+
+function rankName(stat: Stat, pos: RankPos): string {
+  if (pos === 'middle') return stat === 'weight' ? 'middle-weight' : 'middle-volatility';
+  return superlative(stat, pos === 'top');
+}
+
+function describeRank(spec: Extract<ClueSpec, { kind: 'rank' }>): string {
+  const { stat, pos, prop } = spec;
+  const subject = `The ${rankName(stat, pos)} component`;
+  const o = otherStat(stat);
+  switch (prop.p) {
+    case 'slot':
+      return `${subject} is ${prop.is ? '' : 'not '}the ${prop.slot}.`;
+    case 'origin':
+      return `${subject} ${prop.is ? 'must' : 'cannot'} be ${prop.origin}.`;
+    case 'alsoRank':
+      return prop.is
+        ? `${subject} is also the ${superlative(o, prop.pos2 === 'top')}.`
+        : `${subject} cannot also be the ${superlative(o, prop.pos2 === 'top')}.`;
+    case 'bound':
+      return o === 'weight'
+        ? `${subject} weighs ${prop.op === 'over' ? 'more' : 'less'} than ${prop.n}.`
+        : `${subject} has a volatility ${prop.op} ${prop.n}.`;
+    case 'parity':
+      return `${subject}'s ${o} is ${prop.even ? 'even' : 'odd'}.`;
+    case 'vsBottom':
+      return `${subject} is ${heavier(o, prop.more)} than the ${superlative(stat, false)}.`;
+    case 'share':
+      return `The ${superlative(stat, true)} and ${superlative(stat, false)} components ${prop.same ? 'must' : 'cannot'} share an origin.`;
+    case 'spread': {
+      const pair = stat === 'weight' ? 'The heaviest and lightest components' : 'The most and least volatile components';
+      return `${pair} differ in ${stat} by ${prop.op === 'atLeast' ? 'at least' : 'at most'} ${prop.n}.`;
+    }
+    case 'outweighs':
+      return stat === 'weight'
+        ? `${subject} ${prop.is ? 'weighs' : 'does not weigh'} more than the other two combined.`
+        : `${subject} ${prop.is ? 'is' : 'is not'} more volatile than the other two combined.`;
+    case 'value':
+      return `The middle ${stat} is ${prop.op === 'is' ? '' : `${prop.op} `}${prop.n}.`;
+    case 'valueParity':
+      return `The middle ${stat} is ${prop.even ? 'even' : 'odd'}.`;
+  }
+}
+
+function describeAny(spec: Extract<ClueSpec, { kind: 'anyOrigin' }>): string {
+  const { origin, must, prop } = spec;
+  const subject = `Any ${origin} component ${must ? 'must' : 'cannot'}`;
+  switch (prop.p) {
+    case 'vsSlot':
+      return `${subject} be ${heavier(prop.stat, true)} than the ${prop.slot}.`;
+    case 'bound':
+      return prop.stat === 'weight'
+        ? `${subject} weigh ${prop.op === 'over' ? 'more' : 'less'} than ${prop.n}.`
+        : `${subject} have a volatility ${prop.op} ${prop.n}.`;
+    case 'parity':
+      return `${subject} have ${prop.even ? 'an even' : 'an odd'} ${prop.stat}.`;
+    case 'vsOrigin':
+      return must
+        ? `${subject} be ${heavier(prop.stat, true)} than any ${prop.other} component.`
+        : `No ${origin} component can be ${heavier(prop.stat, true)} than ${article(prop.other)} ${prop.other} component.`;
   }
 }
