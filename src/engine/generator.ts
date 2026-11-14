@@ -35,14 +35,21 @@ export function seedFor(puzzleNumber: number): number {
   return hashString(`a-lot-on-the-burner:${puzzleNumber}`);
 }
 
-/** Most days are 5–20; above 20 is rare (≈8%). */
+/** Daily target ranks follow a normal curve: most days land 13–17, 10–20 is the norm, the extremes are rare. */
+const TARGET_MEAN = 15;
+const TARGET_SD = 3.5;
+
+/** Standard normal sample (Box–Muller). */
+function gaussian(rng: Rng): number {
+  const u = 1 - rng(); // (0, 1], keeps log finite
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
+}
+
 export function pickTargetRank(rng: Rng): number {
-  const r = rng();
-  if (r < 0.3) return randInt(rng, 5, 10);
-  if (r < 0.62) return randInt(rng, 11, 15);
-  if (r < 0.92) return randInt(rng, 16, 20);
-  if (r < 0.98) return randInt(rng, 21, 25);
-  return randInt(rng, 26, 30);
+  for (;;) {
+    const rank = Math.round(TARGET_MEAN + TARGET_SD * gaussian(rng));
+    if (rank >= MIN_RANK && rank <= MAX_RANK) return rank; // redraw rather than pile up at the ends
+  }
 }
 
 /** 0 at the easiest rank, 1 at the hardest. */
