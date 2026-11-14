@@ -47,25 +47,25 @@ group('roster', () => {
 });
 
 group('clues', () => {
-  const combo = { base: ingredient('b01'), catalyst: ingredient('c02'), binder: ingredient('d02') };
-  // Contract Ink (demonic 5/6), Imp Ash (demonic 1/8), Ash Resin (natural 5/3)
+  const combo = { base: ingredient('b15'), catalyst: ingredient('c08'), binder: ingredient('d06') };
+  // Mindwretch Resin (spectral 6/9), Contract Paper (demonic 1/1), Shield Blossom (natural 6/1)
   it('handles ties in comparisons', () => {
     expect(satisfies({ kind: 'extreme', slot: 'base', stat: 'weight', most: true, strict: true }, combo)).toBe(false);
     expect(satisfies({ kind: 'extreme', slot: 'base', stat: 'weight', most: true, strict: false }, combo)).toBe(true);
   });
   it('treats pairing clues as vacuous when the ingredient is absent', () => {
-    expect(satisfies({ kind: 'pairing', id: 'b01', slot: 'binder', origin: 'natural', only: false }, combo)).toBe(false);
+    expect(satisfies({ kind: 'pairing', id: 'b15', slot: 'binder', origin: 'natural', only: false }, combo)).toBe(false);
     expect(satisfies({ kind: 'pairing', id: 'b02', slot: 'binder', origin: 'natural', only: false }, combo)).toBe(true);
   });
   it('evaluates proportional clues', () => {
-    // total weight 11; base 5 → more than a third, less than half
+    // total weight 13; base 6 → more than a third, less than half
     expect(satisfies({ kind: 'shareFraction', slot: 'base', stat: 'weight', ifOrigin: null, moreThan: true, den: 3 }, combo)).toBe(true);
     expect(satisfies({ kind: 'shareFraction', slot: 'base', stat: 'weight', ifOrigin: null, moreThan: true, den: 2 }, combo)).toBe(false);
     expect(satisfies({ kind: 'shareFraction', slot: 'base', stat: 'weight', ifOrigin: 'natural', moreThan: true, den: 2 }, combo)).toBe(true);
   });
   it('reads naturally', () => {
-    expect(describe({ kind: 'pairing', id: 'b01', slot: 'binder', origin: 'natural', only: false })).toBe(
-      'Contract Ink cannot be paired with a natural binder.',
+    expect(describe({ kind: 'pairing', id: 'b15', slot: 'binder', origin: 'natural', only: false })).toBe(
+      'Mindwretch Resin cannot be paired with a natural binder.',
     );
     expect(describe({ kind: 'shareFraction', slot: 'base', stat: 'weight', ifOrigin: 'natural', moreThan: false, den: 3 })).toBe(
       'A natural base cannot account for more than a third of the total weight.',
