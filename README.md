@@ -56,7 +56,7 @@ npm run puzzle -- --rank 18 --json               # also print the stored JSON
 npm run puzzle -- --rank 18 --write 400          # save as public/puzzles/400.json (add --force to overwrite)
 ```
 
-Other flags: `--tries N` (seed attempts, default 200) and `--allow-miss` (accept the closest rank instead of exiting with an error). Nothing is written to disk unless `--write` is given, and a missed rank is never written.
+Other flags: `--tries N` (seed attempts, default 300) and `--allow-miss` (accept the closest rank instead of exiting with an error). Nothing is written to disk unless `--write` is given, and a missed rank is never written.
 
 ### Generation
 

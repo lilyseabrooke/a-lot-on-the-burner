@@ -224,7 +224,7 @@ group('published puzzles', () => {
 
 group('generateAtRank (debug sample puzzles)', () => {
   it('lands exactly on the requested rank, solvably, and is reproducible from its seed', () => {
-    for (const rank of [6, 15, 24]) {
+    for (const rank of [5, 6, 15, 24]) {
       const made = generateAtRank(rank, 1234);
       expect(made.hit).toBe(true);
       expect(made.puzzle.intensity).toBe(rank);

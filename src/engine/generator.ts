@@ -364,7 +364,7 @@ interface Attempt {
   minClues: number;
 }
 
-function chooseSets(rng: Rng, target: number): Available {
+function chooseSets(rng: Rng, target: number, smallest = false): Available {
   const d = difficulty(target);
   const lo = Math.round(MIN_SET + 4 * d);
   const hi = Math.min(MAX_SET, lo + 2);
@@ -372,7 +372,7 @@ function chooseSets(rng: Rng, target: number): Available {
   for (const slot of SLOTS) {
     // Occasionally restrict one shelf hard, whatever the difficulty.
     const restricted = rng() < 0.15;
-    const n = restricted ? MIN_SET : randInt(rng, Math.max(MIN_SET, lo - 1), hi);
+    const n = restricted || smallest ? MIN_SET : randInt(rng, Math.max(MIN_SET, lo - 1), hi);
     available[slot] = shuffle(rng, rosterFor(slot))
       .slice(0, n)
       .map((i) => i.id)
@@ -435,10 +435,10 @@ function pickDud(
   return -1;
 }
 
-function attempt(rng: Rng, puzzleNumber: number, target: number): Attempt | null {
+function attempt(rng: Rng, puzzleNumber: number, target: number, smallestShelf = false): Attempt | null {
   const d = difficulty(target);
   const levelCentre = 1 + 4 * d;
-  const available = chooseSets(rng, target);
+  const available = chooseSets(rng, target, smallestShelf);
   const combos = allCombos(available);
   const n = combos.length;
   const solutionIndex = randInt(rng, 0, n - 1);
@@ -564,24 +564,32 @@ export interface RankResult extends GenerateResult {
 }
 
 /**
- * Makes a puzzle at exactly `rank`, for debugging and sampling. The generator only aims at a rank, so this tries
- * baseSeed, baseSeed + 1, … until one lands on it. If none does within `tries`, returns the closest with `hit: false`.
+ * How far below the requested rank to aim, cycled by seed. Attempts overshoot more often than they undershoot
+ * (aiming at rank 10 mostly yields 11–13), so aiming a little low lands on the rank far more often.
  */
-export function generateAtRank(rank: number, baseSeed: number, { tries = 200, number = 0 } = {}): RankResult {
+const AIM_BELOW = [0, 1, 2, 3];
+
+/**
+ * Makes a puzzle at exactly `rank`, for debugging and sampling. The generator only aims at a rank, so this makes
+ * single attempts with seeds baseSeed, baseSeed + 1, … until one lands on it, and returns the closest with
+ * `hit: false` if none does within `tries`. Each attempt costs ~50–150ms.
+ *
+ * Rank 5 is special: it needs exactly three level-1 clues on a 6 × 6 × 6 shelf (anything more rounds up to 6),
+ * so those attempts always use the smallest shelf. The aim and shelf depend only on the seed, so passing a result's
+ * `seed` back as `baseSeed` reproduces its puzzle on the first attempt.
+ */
+export function generateAtRank(rank: number, baseSeed: number, { tries = 300, number = 0 } = {}): RankResult {
   let best: RankResult | null = null;
   let attempts = 0;
   for (let i = 0; i < tries; i++) {
     attempts = i + 1;
     const seed = (baseSeed + i) >>> 0;
-    let result: GenerateResult;
-    try {
-      result = generatePuzzle(number, seed, rank);
-    } catch {
-      continue; // the generator gave up on this seed; try the next
-    }
-    const hit = result.puzzle.intensity === rank;
-    if (!best || Math.abs(result.puzzle.intensity - rank) < Math.abs(best.puzzle.intensity - rank)) {
-      best = { ...result, seed, attempts, hit };
+    const aim = Math.max(MIN_RANK, rank - AIM_BELOW[seed % AIM_BELOW.length]);
+    const a = attempt(mulberry32(seed), number, aim, rank === MIN_RANK);
+    if (!a) continue; // the generator gave up on this seed; try the next
+    const hit = a.rank === rank;
+    if (!best || Math.abs(a.rank - rank) < Math.abs(best.puzzle.intensity - rank)) {
+      best = { puzzle: a.puzzle, target: rank, minClues: a.minClues, seed, attempts, hit };
     }
     if (hit) break;
   }

@@ -8,7 +8,7 @@
  *   npm run puzzle -- --rank 18 --write 400 --force   # overwrite an existing file
  *
  * The generator aims at a rank but can land off it, so this retries with fresh seeds
- * until the rank matches exactly (up to --tries, default 200). If none match, it
+ * until the rank matches exactly (up to --tries, default 300). If none match, it
  * reports the closest one and exits non-zero unless --allow-miss is passed.
  *
  * Without --write nothing on disk changes. The puzzle's answer is printed here for
@@ -49,7 +49,7 @@ const parseInt0 = (name: string, fallback: number, min: number) => {
   if (!Number.isInteger(n) || n < min) fail(`--${name} must be a whole number of at least ${min} (got "${raw}").`);
   return n;
 };
-const tries = parseInt0('tries', 200, 1);
+const tries = parseInt0('tries', 300, 1);
 const writeTo = has('write') ? parseInt0('write', NaN, 1) : undefined;
 if (has('write') && (writeTo === undefined || Number.isNaN(writeTo))) fail('--write needs a puzzle number, e.g. --write 400.');
 
