@@ -122,7 +122,7 @@ export function BrewButton({ ready, onBrew, onNotReady, onConfirmFallback }: Pro
           <motion.span className="brew-fill" style={{ scaleX: progress }} aria-hidden />
           <span className="brew-label">
             <FlaskConical size={18} strokeWidth={2.2} aria-hidden />
-            {ready ? 'Hold to brew' : 'Fill all three slots'}
+            {ready ? 'Activate the burner' : 'Fill the burner'}
           </span>
         </motion.span>
       </motion.button>

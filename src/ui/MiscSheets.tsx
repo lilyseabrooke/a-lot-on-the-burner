@@ -55,15 +55,15 @@ export function ConfirmSheet({
     <Sheet
       open={open}
       onClose={onCancel}
-      eyebrow="One brew only"
-      title="Brew this potion?"
+      eyebrow="Confirm"
+      title="Activate the brew?"
       actions={
         <>
           <motion.button type="button" className="button" onClick={onCancel} whileTap={{ scale: PRESS_SCALE }} transition={spring.snappy}>
-            Keep thinking
+            Give me a second
           </motion.button>
           <motion.button type="button" className="button primary" onClick={onConfirm} whileTap={{ scale: PRESS_SCALE }} transition={spring.snappy}>
-            Brew
+            Let’s do it
           </motion.button>
         </>
       }
@@ -77,7 +77,7 @@ export function ConfirmSheet({
         ))}
       </dl>
       <p className="muted">
-        You have revealed {revealed} clue{revealed === 1 ? '' : 's'}. There is no second attempt.
+        You have revealed {revealed} clue{revealed === 1 ? '' : 's'}. You’ve only got one shot.
       </p>
     </Sheet>
   );

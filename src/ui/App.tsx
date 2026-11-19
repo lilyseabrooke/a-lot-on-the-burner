@@ -224,7 +224,7 @@ export function App() {
             <h1 className="wordmark">A Lot on the Burner</h1>
             {puzzle && (
               <p className="title-meta">
-                No. {puzzle.number}
+                Vial {puzzle.number}
                 <span className="rank" title="Intensity Rank">
                   <Flame size={12} strokeWidth={2.6} aria-hidden />
                   <span className="sr-only">Intensity Rank</span>
@@ -243,11 +243,11 @@ export function App() {
           </div>
         </header>
 
-        {load.state === 'loading' && <p className="notice">Warming the burner…</p>}
+        {load.state === 'loading' && <p className="notice">Opening the lab...</p>}
         {load.state === 'missing' && (
           <div className="notice">
-            <h2>The burner is cold</h2>
-            <p>There is no potion to brew today. Check back soon.</p>
+            <h2>The lab is empty</h2>
+            <p>No new potion request yet. Come back tomorrow.</p>
           </div>
         )}
 
@@ -308,7 +308,7 @@ export function App() {
                     whileTap={{ scale: PRESS_SCALE }}
                     transition={spring.bouncy}
                   >
-                    {record.status === 'won' ? 'The potion holds' : 'The potion curdled'} · Results
+                    {record.status === 'won' ? 'Spectral' : 'Sparked out'} · Results
                   </motion.button>
                 ) : (
                   <>
@@ -316,7 +316,7 @@ export function App() {
                       type="button"
                       className={`notes-toggle${notes ? ' is-on' : ''}`}
                       aria-pressed={notes}
-                      aria-label="Notes mode: tap ingredients to rule them out"
+                      aria-label="Notes mode: tap ingredients to cross them off"
                       onClick={() => {
                         fx(notes ? 'notesOff' : 'notesOn');
                         setNotes((n) => !n);
