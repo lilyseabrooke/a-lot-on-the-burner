@@ -19,7 +19,7 @@ function shownCount({ revealed, finished, minClues }: Pick<Props, 'revealed' | '
 }
 
 function Flag({ i, revealed, finished, minClues }: { i: number } & Pick<Props, 'revealed' | 'finished' | 'minClues'>) {
-  if (finished && i + 1 === minClues) return <span className="clue-flag">Minimum</span>;
+  if (finished && i + 1 === minClues) return <span className="clue-flag">Breakthrough</span>;
   if (i >= revealed) return <span className="clue-flag is-muted">Not revealed</span>;
   return null;
 }
@@ -43,7 +43,7 @@ function RevealButton({ revealed, total, onReveal }: { revealed: number; total: 
       ) : (
         <>
           <Plus size={15} strokeWidth={2.6} aria-hidden />
-          Reveal clue
+          New clue
         </>
       )}
     </motion.button>

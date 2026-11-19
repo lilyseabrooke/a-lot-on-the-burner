@@ -23,9 +23,9 @@ interface Props {
 
 function verdict(used: number, min: number): string {
   const over = used - min;
-  if (over < 0) return `${used} clue${used === 1 ? '' : 's'}, before the minimum of ${min}. A bold guess that paid off.`;
-  if (over === 0) return `${used} clues: exactly the minimum.`;
-  return `${used} clues. The minimum was ${min}, so ${over} more than you needed.`;
+  if (over < 0) return `${used} clue${used === 1 ? '' : 's'}, before the minimum of ${min}. Galobalo’s luck.`;
+  if (over === 0) return `${used} clues: perfect breakthrough.`;
+  return `${used} clues. The breakthrough was at ${min}, so you used ${over} extra.`;
 }
 
 function Countdown() {
@@ -36,7 +36,7 @@ function Countdown() {
   }, []);
   return (
     <p className="countdown">
-      <span className="eyebrow">Next potion in</span>
+      <span className="eyebrow">Next request coming in</span>
       <span className="countdown-value">{formatCountdown(ms)}</span>
     </p>
   );
@@ -46,7 +46,7 @@ export function ResultSheet({ open, onClose, number, intensity, record, solution
   if (record.status === 'playing') return null;
   const won = record.status === 'won';
   return (
-    <Sheet open={open} onClose={onClose} eyebrow={`No. ${number} · Rank ${intensity}`} title={won ? 'The potion holds' : 'The potion curdles'}>
+    <Sheet open={open} onClose={onClose} eyebrow={`Vial ${number} · Rank ${intensity}`} title={won ? 'Spectral' : 'Sparked out'}>
       <div className="result">
         <motion.p
           className={`result-verdict ${won ? 'is-won' : 'is-lost'}`}
@@ -54,7 +54,7 @@ export function ResultSheet({ open, onClose, number, intensity, record, solution
           animate={{ opacity: 1, scale: 1 }}
           transition={spring.bouncy}
         >
-          {won ? verdict(record.revealed, minClues) : `Only one potion fit after clue ${minClues}. You brewed after ${record.revealed}.`}
+          {won ? verdict(record.revealed, minClues) : `The breakthrough was at clue ${minClues}. You brewed after ${record.revealed}.`}
         </motion.p>
         {!won && (
           <div className="result-recipe" aria-label="The recipe">
